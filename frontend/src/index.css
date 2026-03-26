@@ -1,0 +1,84 @@
+@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+
+@layer base {
+  body {
+    @apply bg-[#F7FAF9] text-slate-800 overflow-x-hidden;
+    font-family: 'Inter', sans-serif;
+    min-height: 100vh;
+  }
+}
+
+@layer components {
+  .glass-panel {
+    @apply bg-white/80 backdrop-blur-xl border border-white shadow-2xl rounded-2xl;
+  }
+  .glass-card {
+    @apply bg-white backdrop-blur-md border border-slate-100 rounded-[2rem] shadow-sm transition-all duration-300;
+  }
+  .glass-card:hover {
+    @apply shadow-xl shadow-slate-200/50 translate-y-[-2px];
+  }
+  
+  .btn-primary {
+    @apply px-4 py-2 bg-[#A8E6CF] hover:bg-[#8FD4BB] text-[#2D5A4C] rounded-xl font-bold transition-all shadow-md active:scale-95;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    @apply bg-slate-200 rounded-full hover:bg-[#A8E6CF] transition-colors;
+  }
+}
+
+/* Base Animations */
+.bg-particles {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  z-index: -1;
+  background-image: 
+    radial-gradient(circle at 10% 20%, rgba(168, 230, 207, 0.2) 0%, transparent 40%),
+    radial-gradient(circle at 90% 80%, rgba(143, 212, 187, 0.2) 0%, transparent 40%);
+}
+
+.orb-1, .orb-2 {
+  position: fixed;
+  border-radius: 50%;
+  filter: blur(100px);
+  z-index: -1;
+  animation: float 25s infinite ease-in-out;
+  pointer-events: none;
+}
+.orb-1 {
+  width: 500px;
+  height: 500px;
+  background: rgba(168, 230, 207, 0.3);
+  top: -200px;
+  left: 10%;
+}
+.orb-2 {
+  width: 600px;
+  height: 600px;
+  background: rgba(143, 212, 187, 0.2);
+  bottom: -200px;
+  right: 5%;
+  animation-delay: -12s;
+}
+
+@keyframes float {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(30px, -50px) scale(1.1); }
+  66% { transform: translate(-20px, 20px) scale(0.9); }
+}
+
+::selection {
+  @apply bg-[#A8E6CF] text-[#2D5A4C];
+}

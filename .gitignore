@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+.DS_Store
+
+# Enviroment
+.env
+.env.local
+
+# Build
+dist/
+build/
+.next/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Large Data (The 475MB CSV)
+HI-Small_Trans.csv
+frontend/public/HI-Small_Trans.csv
+
+# AI Artifacts (If needed)
+.gemini/
+.agents/

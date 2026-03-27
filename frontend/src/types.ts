@@ -15,8 +15,9 @@ export interface Transaction {
 export interface Rule {
   clause_id: string;
   condition: string;
-  requirement: string;
+  obligation: string;
   exception: string | null;
+  section_ref: string;
   confidence: number;
-  is_vague: boolean;
+  parent_id?: string | null;
 }

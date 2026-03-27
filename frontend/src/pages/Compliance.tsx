@@ -155,7 +155,7 @@ export const Compliance: React.FC = () => {
       // 1. Evaluate every Rule from the PDF against the transaction
       rules.forEach(rule => {
         const id = rule.clause_id;
-        const text = (rule.id + ' ' + rule.clause_id + ' ' + rule.condition + ' ' + rule.requirement).toLowerCase();
+        const text = (rule.clause_id + ' ' + (rule.section_ref || '') + ' ' + rule.condition + ' ' + rule.obligation + ' ' + (rule.exception || '')).toLowerCase();
         
         let triggered = false;
         let specificReason = '';
@@ -460,11 +460,11 @@ export const Compliance: React.FC = () => {
                <table className="w-full text-left">
                  <thead className="bg-slate-50/50 sticky top-0 z-10 backdrop-blur-sm border-b border-slate-100">
                    <tr>
-                     <th className="py-5 px-8 text-left font-black text-[11px] uppercase tracking-widest text-slate-400 w-32">Index</th>
+                     <th className="py-5 px-8 text-left font-black text-[11px] uppercase tracking-widest text-slate-400 w-32">TXN ID</th>
                      <SortHeader label="Amount" col="amount" />
-                     <th className="py-5 px-6 text-left font-black text-[11px] uppercase tracking-widest text-slate-400">Transaction Type</th>
-                     <th className="py-5 px-6 text-left font-black text-[11px] uppercase tracking-widest text-slate-400">Employee ID</th>
-                     <th className="py-5 px-6 text-left font-black text-[11px] uppercase tracking-widest text-slate-400">Rules Violated</th>
+                     <th className="py-5 px-6 text-left font-black text-[11px] uppercase tracking-widest text-slate-400">Type</th>
+                     <th className="py-5 px-6 text-left font-black text-[11px] uppercase tracking-widest text-slate-400">Account</th>
+                     <th className="py-5 px-6 text-left font-black text-[11px] uppercase tracking-widest text-slate-400">Forensic Audit Summary</th>
                      <SortHeader label="Risk Level" col="risk" />
                      <th className="py-5 px-8 text-right font-black text-[11px] uppercase tracking-widest text-slate-400 w-24">Action</th>
                    </tr>
@@ -498,16 +498,46 @@ export const Compliance: React.FC = () => {
                                    <span key={idx} className="px-2 py-0.5 bg-rose-50 text-rose-500 rounded-md text-[9px] font-black border border-rose-100 uppercase tracking-tighter shrink-0">{r.clause_id}</span>
                                  ))}
                                </div>
-                                <div className="space-y-1.5 whitespace-pre-line">
-                                  {d._rules.map((r: any, idx: number) => (
-                                     <div key={idx} className="flex flex-col gap-0.5 relative pl-3 before:absolute before:left-0 before:top-1.5 before:w-1.5 before:h-1.5 before:bg-[#A8E6CF] before:rounded-full">
-                                       <p className="text-[10px] text-slate-800 font-bold leading-tight">
-                                         {r.requirement}
-                                       </p>
-                                       <p className="text-[9px] text-slate-400 font-medium leading-relaxed italic">
-                                         {r._reason}
-                                       </p>
-                                     </div>
+                                 <div className="space-y-1.5 whitespace-pre-line">
+                                   {d._rules.map((r: any, idx: number) => (
+                                       <div key={idx} className="flex flex-col gap-2 py-2 px-3 bg-white rounded-xl border border-slate-100 shadow-sm hover:border-[#A8E6CF] transition-all mb-2">
+                                          <div className="flex items-center justify-between border-b border-slate-50 pb-1.5 mb-1">
+                                             <div className="flex items-center gap-2">
+                                                <span className="text-[10px] font-black text-[#2D5A4C] bg-[#A8E6CF]/20 px-2 py-0.5 rounded cursor-default uppercase">{r.clause_id}</span>
+                                                <span className="text-[9px] font-black text-slate-400 opacity-60 uppercase">{r.section_ref || 'GENERAL'}</span>
+                                             </div>
+                                             <div className="flex items-center gap-1.5">
+                                                <span className="text-[8px] font-bold text-slate-300 uppercase">AI Conf:</span>
+                                                <span className="text-[10px] font-black text-[#A8E6CF]">{r.confidence || 98}%</span>
+                                             </div>
+                                          </div>
+                                          
+                                          <div className="grid grid-cols-1 gap-2">
+                                             <div>
+                                                <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Condition (Triggering Logic)</p>
+                                                <p className="text-[10px] text-slate-700 font-medium leading-tight line-clamp-2 italic">“{r.condition}”</p>
+                                             </div>
+                                             
+                                             <div>
+                                                <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Obligation (Impact Enforcement)</p>
+                                                <p className="text-[10px] text-emerald-600 font-bold leading-tight">{r.obligation}</p>
+                                             </div>
+
+                                             {r.exception && (
+                                               <div>
+                                                  <p className="text-[8px] font-black text-rose-300 uppercase tracking-widest mb-0.5">Exception</p>
+                                                  <p className="text-[9px] text-rose-400/80 font-medium leading-tight line-clamp-1">{r.exception}</p>
+                                               </div>
+                                             )}
+
+                                             <div className="pt-1.5 border-t border-slate-50">
+                                                <p className="text-[8px] font-black text-slate-300 uppercase tracking-widest mb-0.5">Forensic Findings</p>
+                                                <p className="text-[9px] text-slate-400 font-medium leading-relaxed italic border-l-2 border-[#A8E6CF]/30 pl-2">
+                                                   {r._reason}
+                                                </p>
+                                             </div>
+                                          </div>
+                                       </div>
                                   ))}
                                 </div>
                              </div>

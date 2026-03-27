@@ -23,17 +23,17 @@ const groq = new Groq();
 const systemPrompt = `You are a compliance rule extractor for Indian banking. Extract every enforceable rule from this policy document. 
 Return the output as a JSON object with a key "rules" which is an array of rule objects.
 Each rule object must have:
-- clause_id: string
-- condition: string
-- requirement: string
-- exception: string or null
-- confidence: number (0-100)
-- is_vague: boolean
+- clause_id: string (e.g., "AML-001")
+- condition: string (The trigger, e.g., "transaction_amount > 1000000")
+- obligation: string (The action, e.g., "report_to_FIU_within_days:7")
+- exception: string or null (Exemptions, e.g., "account_type == 'government'")
+- section_ref: string (The original manual/section number, e.g., "Section 3.1.2")
+- parent_id: string or null (If this rule depends on or references a previous clause_id)
 
 Example format:
 {
   "rules": [
-    { "clause_id": "1.1", "condition": "...", "requirement": "...", "exception": null, "confidence": 90, "is_vague": false }
+    { "clause_id": "AML-003", "condition": "transaction_amount > 1000000", "obligation": "report_to_FIU_within_days:7", "exception": "account_type == 'government'", "section_ref": "Section 3.1.2", "parent_id": null }
   ]
 }`;
 

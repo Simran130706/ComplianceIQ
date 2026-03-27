@@ -23,3 +23,6 @@ frontend/public/HI-Small_Trans.csv
 # AI Artifacts (If needed)
 .gemini/
 .agents/
+
+# Temp Uploads
+backend/uploads/

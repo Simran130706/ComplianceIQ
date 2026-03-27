@@ -1,0 +1,23 @@
+RESERVE BANK OF INDIA
+PMLA COMPLIANCE DIRECTIVE - 2024
+
+SECTION 3.1: LARGE CASH INGESTION Thresholds
+Any transaction exceeding INR 10,00,000 (roughly 120,500 USD) or cash ingestion above INR 8,30,000 from a flagged high-risk origin requires immediate managerial approval and manual audit. Suspicious activity flags (PMLA-S1) in the ledger must also trigger an AML alert.
+
+SECTION 3.2: SMURFING AND STRUCTURING LIMITS
+Continuous transfers between INR 8,000 and INR 10,000 from a single account within a single dataset shall be considered structuring behavior (smurfing). These must be flagged for manual review to detect evasion of the reporting threshold.
+
+SECTION 3.3: VELOCITY AND RAPID SUCCESSION
+More than 10 transactions initiated from the same account holder within a 24-hour cycle constitute a velocity breach. Such high-frequency activity indicates automated scraping or layering and must be halted.
+
+SECTION 4.1: CROSS-BORDER REMITTANCE
+All outward remittances in non-USD currencies (Euro, GBP, etc.) exceeding a value of 600 USD must undergo enhanced KYC verification for local compliance within 24 hours of execution.
+
+SECTION 4.2: CASH REPORTING DUTY
+Any cash-based transaction above the INR 2,00,000 (roughly 2410 USD) individual limit must be reported to the Principal Officer on the same business day to ensure PMLA reporting standards.
+
+SECTION 5.1: ASSET CONCENTRATION AND MULE DETECTION
+Destination accounts receiving funds from more than 10 unique source accounts (mule behavior) must be flagged for enhanced due diligence. Layering techniques involving disparate sources into a single merchant are prohibited.
+
+SECTION 5.2: ROUND NUMBER PROFILING
+Exactly rounded transactions (e.g., INR 10,000, INR 50,000) that occur at high volumes suggest structured laundering profiles and require an immediate AML pattern review.

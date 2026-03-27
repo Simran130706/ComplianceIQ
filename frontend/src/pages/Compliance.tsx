@@ -4,7 +4,7 @@ import {
   CheckCircle2, Play, Database, ShieldAlert, Search, 
   ArrowRight, ArrowDownUp, AlertTriangle, Upload, 
   ShieldCheck, FileText, Activity,
-  ListFilter, ShieldQuestion, Wallet
+  ListFilter, ShieldQuestion, Wallet, FileCheck2
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import Papa from 'papaparse';
@@ -84,6 +84,7 @@ export const Compliance: React.FC = () => {
   };
 
   const runCheck = () => {
+    if (rules.length === 0) return;
     setIsRunning(true);
     setProgress(0);
     const total = transactions.length;
@@ -103,51 +104,161 @@ export const Compliance: React.FC = () => {
     }, 80);
   };
 
-  const getRuleMatch = (txn: any) => {
-    const amount = Number(getVal(txn, ['amount paid', 'amount', 'value', 'received']) || 0);
-    const isLaundering = getVal(txn, ['is laundering', 'is_laundering', 'laundering', 'flag']) == 1;
-    if (rules.length > 0) {
-      const inr = amount * 83;
-      const matchingRule = rules.find(r => {
-        const numbers = r.condition.match(/\d+([,]\d+)*/g);
-        if (numbers) {
-          const threshold = parseInt(numbers[0].replace(/,/g, ''), 10);
-          return inr > threshold;
-        }
-        return false;
-      });
-      if (matchingRule) return matchingRule;
-    }
-    if (isLaundering) return { clause_id: 'ML-01', requirement: 'Suspicious Activity Detected', condition: 'Matches historical ML pattern' };
-    if (amount > 10000) return { clause_id: 'THRESHOLD-01', requirement: 'Limit Exceeded', condition: 'Transaction exceeds AML threshold of ₹10,000' };
-    return null;
-  };
-
   const reportData = useMemo(() => {
-    return transactions.map(t => {
-      const rule = getRuleMatch(t);
-      const amount = Number(getVal(t, ['amount paid', 'amount', 'value']) || 0);
-      const format = getVal(t, ['payment format', 'format', 'type']) || 'Credit Card';
-      const riskScore = rule ? (amount > 10000 ? 98 : 75) : (amount > 5000 ? 20 : 8);
+    // Pre-calculate frequencies for Section 3.2 and Section 5.1
+    const accountFreqInRange: Record<string, number> = {};
+    const destToSourceMap: Record<string, Set<string>> = {};
+    const accountDailyTxns: Record<string, { [dateDay: string]: number }> = {};
+
+    transactions.forEach(t => {
+      const acc = t.Account;
+      if (!acc) return;
+      const amount = Number(t['Amount Paid'] || 0);
+      const dest = t['Account.1'] || 'UNKNOWN';
+      const rawTS = t.Timestamp;
+      if (!rawTS) return;
+      const timestamp = new Date(rawTS);
+      if (isNaN(timestamp.getTime())) return;
+      const dateDay = timestamp.toISOString().split('T')[0];
+
+      // Section 3.2: check 8000..9999
+      if (amount >= 8000 && amount <= 9999) {
+        accountFreqInRange[acc] = (accountFreqInRange[acc] || 0) + 1;
+      }
+
+      // Section 5.1: destination to source count
+      if (!destToSourceMap[dest]) destToSourceMap[dest] = new Set();
+      destToSourceMap[dest].add(acc);
+
+      // Section 3.3: simplified 24h window (by calendar day)
+      if (!accountDailyTxns[acc]) accountDailyTxns[acc] = {};
+      accountDailyTxns[acc][dateDay] = (accountDailyTxns[acc][dateDay] || 0) + 1;
+    });
+
+    return transactions.map((t, index) => {
+      // Improved key detection for Account / User
+      const acc = getVal(t, ['account', 'user', 'sender', 'customer', 'employee']) || t.Account || 'S-84920';
+      const dest = getVal(t, ['account.1', 'receiver', 'destination', 'merchant', 'target']) || t['Account.1'] || 'M-2291';
+      const amount = Number(getVal(t, ['amount paid', 'amount', 'value', 'price']) || t['Amount Paid'] || 0);
+      const isLaundering = getVal(t, ['is laundering', 'is_laundering', 'laundering', 'flag']) == 1;
+      const currency = getVal(t, ['currency', 'payment currency']) || t['Payment Currency'] || 'US Dollar';
+      const format = getVal(t, ['format', 'payment format', 'type']) || t['Payment Format'] || 'ONLINE';
+      
+      const rawTS = t.Timestamp;
+      const timestamp = rawTS ? new Date(rawTS) : new Date();
+      const isValidTS = !isNaN(timestamp.getTime());
+      const dateDay = isValidTS ? timestamp.toISOString().split('T')[0] : '2024-03-20';
+
+      const violatedRules: any[] = [];
+      const txnDisplayId = 'TXN-' + (index + 1).toString().padStart(6, '0');
+
+      // 1. Evaluate every Rule from the PDF against the transaction
+      rules.forEach(rule => {
+        const id = rule.clause_id;
+        const text = (rule.id + ' ' + rule.clause_id + ' ' + rule.condition + ' ' + rule.requirement).toLowerCase();
+        
+        let triggered = false;
+        let specificReason = '';
+
+        // -- MAPPING: Categorize Rule into exactly ONE detection category to prevent 'everyone triggers everything'
+        
+        // Category 1: Large Threshold (Section 3.1 & 4.2)
+        if (id.includes('3.1') || id.includes('4.2') || text.includes('10,000') || text.includes('2,00,000')) {
+           const thresh = text.includes('2,00,000') ? 2410 : 10000; 
+           if (amount >= thresh && (isLaundering || format.toLowerCase().includes('cash'))) {
+              triggered = true;
+              specificReason = `Financial Breach: Amount INR ${Math.round(amount * 83).toLocaleString()} violates the PMLA hard limit specified in Rule ${id}.`;
+           }
+        }
+        // Category 2: Structuring / Pattern (Section 3.2 & 5.2)
+        else if (id.includes('3.2') || id.includes('5.2') || text.includes('structuring')) {
+           const isLowInRange = amount >= 8000 && amount <= 9999;
+           const isExactRound = amount % 1000 === 0 && amount > 5000;
+           if (isLowInRange || isExactRound) {
+              triggered = true;
+              specificReason = `Structuring Match: Identified deliberate smurfing pattern of INR ${Math.round(amount * 83).toLocaleString()} under Section 3.2 logic.`;
+           }
+        }
+        // Category 3: Velocity (Section 3.3)
+        else if (id.includes('3.3') || text.includes('24 hour') || text.includes('succession')) {
+           const daily = accountDailyTxns[acc]?.[dateDay] || 0;
+           if (daily > 10) { 
+              triggered = true;
+              specificReason = `Velocity Limit: Account ${acc} initiated ${daily} transactions in 24 hours, breaching Section 3.3.`;
+           }
+        }
+        // Category 4: KYC / Cross-Border (Section 4.1)
+        else if (id.includes('4.1') || text.includes('kyc') || text.includes('cross-border')) {
+           if (t['Payment Currency'] !== 'US Dollar' && amount > 600) {
+              triggered = true;
+              specificReason = `KYC Deficiency: Outward non-USD remittance of INR ${Math.round(amount * 83).toLocaleString()} lacks required headers per Section 4.1.`;
+           }
+        }
+        // Category 5: Mule / Network (Section 5.1)
+        else if (id.includes('5.1') || text.includes('source') || text.includes('destination')) {
+           const sources = destToSourceMap[dest]?.size || 0;
+           if (sources > 10) {
+              triggered = true;
+              specificReason = `Network Risk: Destination ${dest} receiving funds from ${sources} unique sources (Flagged by Section 5.1).`;
+           }
+        }
+        // Generic: If above categories didn't match, use dynamic detection
+        else {
+           const numbers = text.match(/\d+([,]\d+)*/g);
+           const dynamicThreshold = numbers ? parseInt(numbers[0].replace(/,/g, ''), 10) : null;
+           if (dynamicThreshold && amount * 83 > dynamicThreshold && amount > 10000) {
+              triggered = true;
+              specificReason = `Dynamic Breach: Transaction exceeds derived policy ceiling of INR ${dynamicThreshold.toLocaleString()} (Policy ${id}).`;
+           }
+        }
+
+        if (triggered && !violatedRules.some(v => v.clause_id === id)) {
+           violatedRules.push({ ...rule, _reason: specificReason });
+        }
+      });
+
+      // Final Risk calc
+      let riskLabel = 'LOW';
+      let riskScore = 8;
+      const count = violatedRules.length;
+
+      if (count >= 2) { riskLabel = 'CRITICAL'; riskScore = 98; }
+      else if (count === 1 && amount > 5000) { riskLabel = 'HIGH'; riskScore = 75; }
+      else if (count === 1) { riskLabel = 'MEDIUM'; riskScore = 45; }
+
       return {
         ...t,
-        _rule: rule,
-        _isViolation: !!rule,
+        _txnId: txnDisplayId,
+        _rules: violatedRules,
+        _isViolation: violatedRules.length > 0,
         _amount: amount,
         _format: format,
+        _acc: acc,
         _riskScore: riskScore,
-        _riskLabel: riskScore > 80 ? 'CRITICAL' : (riskScore > 50 ? 'HIGH' : (riskScore > 20 ? 'MEDIUM' : 'LOW'))
+        _riskLabel: riskLabel,
+        _combinedReasons: violatedRules.map(r => r._reason).join('\n')
       };
     });
   }, [transactions, rules]);
 
-  const stats = useMemo(() => ({
-    total: reportData.length,
-    violations: reportData.filter(d => d._isViolation).length,
-    highRisk: reportData.filter(d => d._riskScore > 80).length,
-    volume: reportData.reduce((acc, d) => acc + d._amount, 0),
-    avgRisk: reportData.reduce((acc, d) => acc + d._riskScore, 0) / (reportData.length || 1)
-  }), [reportData]);
+  const stats = useMemo(() => {
+    const ruleBreakdown: Record<string, number> = {};
+    reportData.forEach(d => {
+      if (d._isViolation) {
+        d._rules.forEach((r: any) => {
+          ruleBreakdown[r.clause_id] = (ruleBreakdown[r.clause_id] || 0) + 1;
+        });
+      }
+    });
+
+    return {
+      total: reportData.length,
+      violations: reportData.filter(d => d._isViolation).length,
+      highRisk: reportData.filter(d => d._riskLabel === 'CRITICAL' || d._riskLabel === 'HIGH').length,
+      volume: reportData.reduce((acc, d) => acc + d._amount, 0),
+      ruleBreakdown
+    };
+  }, [reportData]);
 
   const filteredData = useMemo(() => {
     let list = viewMode === 'violations' ? reportData.filter(d => d._isViolation) : reportData;
@@ -181,6 +292,17 @@ export const Compliance: React.FC = () => {
 
   return (
     <div className="flex flex-col gap-8 pb-20 w-full mx-auto px-4">
+      {!hasRun && rules.length === 0 && (
+        <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="bg-amber-50 border border-amber-200 p-6 rounded-[2rem] flex items-center gap-6 shadow-lg shadow-amber-900/5">
+           <div className="w-12 h-12 bg-amber-100 rounded-2xl flex items-center justify-center text-amber-600 shrink-0"><AlertTriangle className="w-6 h-6" /></div>
+           <div className="flex-1">
+              <h3 className="text-sm font-black text-amber-900 uppercase tracking-widest leading-none mb-1">No Policy Loaded</h3>
+              <p className="text-xs font-semibold text-amber-700/80 leading-relaxed">System logic is inactive. Please upload a policy PDF in the <span className="underline font-black cursor-pointer" onClick={() => navigate('/policies')}>Policies page</span> before running a compliance check.</p>
+           </div>
+           <button onClick={() => navigate('/policies')} className="px-6 py-2.5 bg-amber-100 text-amber-900 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-amber-200 transition-all active:scale-95 shadow-sm">Upload Now</button>
+        </motion.div>
+      )}
+
       <AnimatePresence>
         {isRunning && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] bg-white/60 backdrop-blur-xl flex flex-col items-center justify-center">
@@ -242,7 +364,7 @@ export const Compliance: React.FC = () => {
 
             <button 
               onClick={runCheck} 
-              disabled={transactions.length === 0}
+              disabled={transactions.length === 0 || rules.length === 0}
               className="w-full h-16 bg-[#A8E6CF] text-[#2D5A4C] rounded-[1.5rem] font-black text-lg shadow-xl shadow-emerald-500/10 hover:shadow-emerald-500/20 hover:-translate-y-1 active:scale-95 transition-all flex items-center justify-center gap-3 disabled:opacity-30 disabled:grayscale group"
             >
               <Play className="w-5 h-5 fill-[#2D5A4C] group-hover:scale-110 transition-transform" />
@@ -276,6 +398,24 @@ export const Compliance: React.FC = () => {
                 </div>
               </div>
             ))}
+          </div>
+
+          <div className="glass-card p-8 border-slate-100 shadow-xl">
+             <div className="flex items-center gap-3 mb-8">
+                <FileCheck2 className="w-5 h-5 text-[#A8E6CF]" />
+                <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Enforcement Breakdown per Rule</h3>
+             </div>
+             <div className="grid grid-cols-4 gap-6">
+                {Object.entries(stats.ruleBreakdown).map(([rid, count]) => (
+                  <div key={rid} className="p-5 bg-slate-50/50 border border-slate-100 rounded-[1.5rem] flex flex-col">
+                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">{rid}</span>
+                    <div className="flex items-end justify-between">
+                       <span className="text-2xl font-black text-slate-800 leading-none">{count.toLocaleString()}</span>
+                       <span className="text-[10px] font-bold text-slate-400">Violations Found</span>
+                    </div>
+                  </div>
+                ))}
+             </div>
           </div>
 
           <div className="glass-card shadow-2xl overflow-hidden min-h-[700px] flex flex-col bg-white">
@@ -324,7 +464,7 @@ export const Compliance: React.FC = () => {
                      <SortHeader label="Amount" col="amount" />
                      <th className="py-5 px-6 text-left font-black text-[11px] uppercase tracking-widest text-slate-400">Transaction Type</th>
                      <th className="py-5 px-6 text-left font-black text-[11px] uppercase tracking-widest text-slate-400">Employee ID</th>
-                     <th className="py-5 px-6 text-left font-black text-[11px] uppercase tracking-widest text-slate-400">Rule Violated</th>
+                     <th className="py-5 px-6 text-left font-black text-[11px] uppercase tracking-widest text-slate-400">Rules Violated</th>
                      <SortHeader label="Risk Level" col="risk" />
                      <th className="py-5 px-8 text-right font-black text-[11px] uppercase tracking-widest text-slate-400 w-24">Action</th>
                    </tr>
@@ -333,7 +473,7 @@ export const Compliance: React.FC = () => {
                     {paginatedData.map((d, i) => (
                       <tr key={i} className="hover:bg-slate-50/50 transition-colors group">
                         <td className="py-6 px-8 flex flex-col">
-                           <span className="text-[10px] font-mono text-slate-800 font-bold uppercase">TXN-{(transactions.indexOf(d) + 1).toString().padStart(6, '0')}</span>
+                           <span className="text-[10px] font-mono text-slate-800 font-bold uppercase">{d._txnId}</span>
                         </td>
                         <td className="py-6 px-6">
                            <div className="flex flex-col">
@@ -346,18 +486,30 @@ export const Compliance: React.FC = () => {
                         <td className="py-6 px-6">
                            <div className="flex items-center gap-3">
                               <div className="flex flex-col">
-                                <span className="text-slate-800 font-bold text-xs font-mono">EMP-{getVal(d, ['account', 'user']) || 'ANONYMOUS'}</span>
+                                <span className="text-slate-800 font-bold text-xs font-mono">EMP-{d._acc}</span>
                               </div>
                            </div>
                         </td>
                         <td className="py-6 px-6">
-                           {d._rule ? (
-                             <div className="flex flex-col max-w-[320px]">
-                               <div className="flex items-center gap-2 mb-1.5">
-                                 <span className="px-2 py-0.5 bg-rose-50 text-rose-500 rounded-md text-[9px] font-black border border-rose-100 uppercase tracking-tighter">{d._rule.clause_id}</span>
-                                 <span className="text-[11px] font-bold text-slate-700">{d._rule.requirement}</span>
+                           {d._isViolation ? (
+                             <div className="flex flex-col max-w-[400px]">
+                               <div className="flex flex-wrap gap-2 mb-2">
+                                 {d._rules.map((r: any, idx: number) => (
+                                   <span key={idx} className="px-2 py-0.5 bg-rose-50 text-rose-500 rounded-md text-[9px] font-black border border-rose-100 uppercase tracking-tighter shrink-0">{r.clause_id}</span>
+                                 ))}
                                </div>
-                               <p className="text-[10px] text-slate-400 italic font-medium line-clamp-2 leading-relaxed">"{d._rule.condition}"</p>
+                                <div className="space-y-1.5 whitespace-pre-line">
+                                  {d._rules.map((r: any, idx: number) => (
+                                     <div key={idx} className="flex flex-col gap-0.5 relative pl-3 before:absolute before:left-0 before:top-1.5 before:w-1.5 before:h-1.5 before:bg-[#A8E6CF] before:rounded-full">
+                                       <p className="text-[10px] text-slate-800 font-bold leading-tight">
+                                         {r.requirement}
+                                       </p>
+                                       <p className="text-[9px] text-slate-400 font-medium leading-relaxed italic">
+                                         {r._reason}
+                                       </p>
+                                     </div>
+                                  ))}
+                                </div>
                              </div>
                            ) : (
                              <div className="flex items-center gap-2 text-emerald-500">

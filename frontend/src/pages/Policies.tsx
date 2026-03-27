@@ -160,8 +160,8 @@ export const Policies: React.FC = () => {
                     <div className="flex justify-between items-start">
                       <span className="text-[#2D5A4C] font-black text-xs font-mono bg-emerald-100 py-1 px-3 rounded-lg">{r.clause_id}</span>
                       <div className="flex gap-2">
-                        <span className="text-slate-400 font-black text-[9px] uppercase tracking-widest bg-slate-100 py-1 px-3 rounded-lg border border-slate-200">{rule.section_ref || 'GENERAL'}</span>
-                        {rule.confidence > 85 ? (
+                        <span className="text-slate-400 font-black text-[9px] uppercase tracking-widest bg-slate-100 py-1 px-3 rounded-lg border border-slate-200">{r.section_ref || 'GENERAL'}</span>
+                        {r.confidence > 85 ? (
                           <span className="px-2 py-0.5 bg-emerald-50 text-emerald-600 text-[9px] font-black rounded-lg uppercase tracking-tighter flex items-center gap-1 border border-emerald-100">
                             <ShieldCheck className="w-3 h-3"/> AI Verified
                           </span>

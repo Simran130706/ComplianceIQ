@@ -177,44 +177,18 @@ const circularSystemPrompt = `You are a senior RBI/SEBI compliance auditor AI.
 
 Analyze the circular clauses against the active policy rules.
 
-CLAUSE COUNTING RULES — VERY IMPORTANT:
-- Count ONLY distinct, actionable requirements in the circular
-- Each requirement must be something the bank must DO or COMPLY with
-- Ignore descriptive text, background information, and penalties
-- Each requirement should be specific and measurable
-- Total clauses_checked should typically be between 1-5 for most circulars
-
-STANDARD CLAUSE TYPES:
-1. Implementation requirements (must implement/update/create something)
-2. Deadline requirements (must complete by specific date)
-3. Reporting requirements (must report/notify something)
-4. Compliance requirements (must follow specific guidelines)
-5. Applicability requirements (must apply to specific entities)
-
-EXAMPLE FOR THIS CIRCULAR:
-- "Regulated entities must ensure KYC updation within one year..." = IMPLEMENTATION + DEADLINE
-- "Low-risk customers may continue transactions" = APPLICABILITY
-- "Non-compliance attracts penalties" = COMPLIANCE (this is informational, not actionable)
-
 SCORING INSTRUCTIONS — THIS IS MANDATORY:
-- Count the total number of distinct actionable requirements. Call this clauses_checked.
-- Count how many of those requirements are covered by active rules. Call this clauses_covered.
-- Calculate compliance_score EXACTLY as: Math.round((clauses_covered / clauses_checked) * 100)
-- If there are NO active policy rules at all, clauses_covered = 0, compliance_score = 0
+- Count the total number of distinct requirements in the circular. 
+  Call this clauses_checked. This must NEVER be 0.
+- Count how many of those requirements are covered by active rules.
+  Call this clauses_covered.
+- Calculate compliance_score as: 
+  Math.round((clauses_covered / clauses_checked) * 100)
+- If there are NO active policy rules at all, 
+  clauses_covered = 0, compliance_score = 0
 - If ALL clauses are covered, compliance_score = 100, status = CLEAR
-- compliance_score must be a number between 0 and 100, NEVER null, NEVER undefined, NEVER a string
-
-IMPORTANT COVERAGE MATCHING RULES:
-- A requirement is COVERED if there is ANY policy rule whose topic or intent overlaps with the circular requirement.
-- Be GENEROUS in matching — if the policy rule is in the same domain (KYC, AML, risk, reporting) as the circular requirement, count it as covered.
-- General policies DO count as covering specific requirements if they are in the same category.
-- When in doubt, count it as COVERED if the subject matter is related.
-
-EXAMPLES:
-- If circular requires "KYC updation within one year" and there is ANY KYC or customer due-diligence policy rule, it IS covered.
-- If circular requires "AML screening" and policy has any AML or sanctions rule, it IS covered.
-- If circular requires "reporting" and policy has any reporting or compliance rule, it IS covered.
-- Only mark as GAP if there is truly NO policy of any kind that touches the circular's requirement area.
+- compliance_score must be a number between 0 and 100, NEVER null, 
+  NEVER undefined, NEVER a string
 
 Return ONLY this JSON, no markdown, no extra text:
 {
@@ -231,20 +205,9 @@ Return ONLY this JSON, no markdown, no extra text:
     }
   ],
   "compliance_score": <number 0-100>,
-  "clauses_checked": <number, minimum 1, maximum 5>,
+  "clauses_checked": <number, minimum 1>,
   "clauses_covered": <number>
 }`;
-
-// Standardized clause counting for consistency
-const getStandardClauseCount = (circularId: string): number => {
-  const standardCounts: Record<string, number> = {
-    'RBI/2025-26/51': 3, // KYC updation, low-risk continuation, compliance with penalties
-    'RBI/2025-26/53': 2, // UAPA sanctions list, immediate compliance
-    'RBI/2025-26/75': 2, // Threshold changes, reporting requirements  
-    'RBI/2025-26/242': 2, // Section 51A updates, risk assessment
-  };
-  return standardCounts[circularId] || 3; // Default to 3 for unknown circulars
-};
 
 app.post('/api/analyze-circular', async (req, res) => {
   try {
@@ -319,13 +282,13 @@ app.post('/api/analyze-circular', async (req, res) => {
 ${circularText}
 
 BANK'S CURRENTLY ACTIVE POLICY RULES (${policyRulesArray.length} rules):
-${formattedRulesText || '(No active policy rules provided)'}
+${formattedRulesText}
 
 TASK:
-For each actionable clause in the circular, check if ANY of the active policy rules above covers the same subject area (KYC, AML, reporting, risk, compliance, etc.).
-A clause IS COVERED if any rule touches the same domain or intent — be GENEROUS in matching.
-A clause is a GAP ONLY if completely unaddressed by all rules combined.
-${policyRulesArray.length === 0 ? 'Since there are NO active rules, all clauses are gaps. compliance_score = 0.' : `Since there ARE ${policyRulesArray.length} active policy rules, most clauses should be at least partially covered. Do NOT return 0 coverage unless the rules are completely unrelated to the circular.`}
+Check every clause in the circular against ALL rules listed above.
+A clause is COVERED if ANY rule above addresses the same topic or requirement.
+A clause is a GAP only if NO rule above covers it at all.
+Be generous in matching — if intent matches, it is covered.
 Return the gap analysis JSON.`;
 
     console.log('Calling Groq API for circular analysis...');
@@ -378,45 +341,6 @@ Return the gap analysis JSON.`;
     console.log('compliance_score value:', analysis.compliance_score)
     console.log('clauses_checked:', analysis.clauses_checked)
     console.log('clauses_covered:', analysis.clauses_covered)
-
-    // Validate and fix compliance_score calculation
-    const clausesChecked = Number(analysis.clauses_checked) || 1;
-    const clausesCovered = Number(analysis.clauses_covered) || 0;
-    const hasActiveRules = policyRulesArray.length > 0;
-
-    // Standardize the clause counts
-    const validatedClausesChecked = getStandardClauseCount(circularId);
-    console.log(`Using standardized clause count for ${circularId}: ${validatedClausesChecked}`);
-
-    // Ensure covered doesn't exceed checked
-    let validatedClausesCovered = Math.min(clausesCovered, validatedClausesChecked);
-
-    // CRITICAL FIX: If active rules exist but AI returned 0 coverage, apply a minimum baseline.
-    // This prevents a fully-populated policy engine from showing 0% due to AI being overly strict.
-    if (hasActiveRules && validatedClausesCovered === 0) {
-      // Give at least 1 clause covered as baseline when rules exist. 
-      // The AI being too strict is a known issue with small models.
-      validatedClausesCovered = Math.max(1, Math.floor(validatedClausesChecked * 0.3));
-      console.log(`Baseline correction applied: AI returned 0 coverage with ${policyRulesArray.length} active rules. Setting covered to ${validatedClausesCovered}.`);
-    }
-
-    // Recalculate score with validated numbers
-    let calculatedScore = Math.round((validatedClausesCovered / validatedClausesChecked) * 100);
-    calculatedScore = Math.max(0, Math.min(100, calculatedScore));
-
-    console.log(`Score calculation: ${validatedClausesCovered}/${validatedClausesChecked} = ${calculatedScore}%`);
-    analysis.compliance_score = calculatedScore;
-    analysis.clauses_checked = validatedClausesChecked;
-    analysis.clauses_covered = validatedClausesCovered;
-
-    // Ensure status matches score
-    if (calculatedScore === 100 && analysis.status !== 'CLEAR') {
-      analysis.status = 'CLEAR';
-      console.log('Status updated to CLEAR based on 100% score');
-    } else if (calculatedScore < 100 && analysis.status !== 'GAP_FOUND') {
-      analysis.status = 'GAP_FOUND';
-      console.log('Status updated to GAP_FOUND based on <100% score');
-    }
 
     console.log('Analysis completed successfully');
     return res.json({ circularId, analysis, circularText });

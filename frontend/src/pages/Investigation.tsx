@@ -5,6 +5,7 @@ import { useData } from '../context/DataContext';
 import { formatINR, getRiskLevel, getRiskColor } from '../utils/format';
 import { ReactFlow, Background, Controls, MarkerType, type Node, type Edge } from '@xyflow/react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { generateSARReport, type SARReportData } from '../utils/generateSARReport';
 
 export const Investigation: React.FC = () => {
   const { state } = useLocation();
@@ -76,6 +77,52 @@ export const Investigation: React.FC = () => {
   }, [transactions, t.Account]);
 
   const riskTrendLabel = employeeScore > 70 ? 'CRITICAL' : employeeScore >= 40 ? 'HIGH' : 'LOW';
+
+  const handleGenerateReport = () => {
+    // Map transaction/investigation data to SARReportData format
+    const sarData: SARReportData = {
+      // Transaction Details
+      transactionId: `TXN-${tIndex}`,
+      amount: t['Amount Paid'],
+      amountINR: formatINR(t['Amount Paid']),
+      paymentType: t['Payment Type'] || 'Bank Transfer',
+      date: new Date(t.Timestamp).toLocaleDateString('en-IN'),
+      timestamp: new Date(t.Timestamp).toLocaleString('en-IN'),
+
+      // Employee/Entity Details
+      employeeId: `EMP-${t.Account}`,
+      employeeName: `Employee ${t.Account}`,
+      employeeRiskScore: Math.round(employeeScore),
+      totalViolations: violT,
+      totalTransactions: totalT,
+
+      // Violation Details
+      ruleViolated: ruleViolated,
+      riskLevel: riskTrendLabel,
+      isStructuring: structuringTxns > 0,
+      isMoneylaundering: t['Is Laundering'] === 1,
+
+      // Causality Chain
+      causalityChain: [
+        `Employee ${t.Account} logged into system at ${fTime(timeLogin)}`,
+        `Accessed sensitive financial data at ${fTime(timeAccess)}`,
+        `Initiated transaction of ${formatINR(t['Amount Paid'])} at ${fTime(timeTxn)}`,
+        `ComplianceIQ AI engine flagged violation: "${ruleViolated}"`,
+        `Risk threshold breached — anomaly score computed: ${Math.round(employeeScore)}%`,
+        `Automated SAR flag raised — STR filing initiated at ${fTime(timeFlag)}`
+      ],
+
+      // Officer Details
+      officerName: 'Rajesh Kumar Sharma',
+      officerDesignation: 'Chief Compliance Officer',
+      bankName: 'ComplianceIQ Demo Bank Ltd.',
+      branchName: 'Mumbai Main Branch',
+      reportDate: new Date().toLocaleDateString('en-IN')
+    };
+
+    // Generate and download the real FIU-IND STR PDF
+    generateSARReport(sarData);
+  };
 
   const baseTime = new Date(t.Timestamp).getTime();
   const timeLogin = new Date(baseTime - 5 * 60000);
@@ -327,10 +374,10 @@ export const Investigation: React.FC = () => {
 
                <div className="p-10 border-t border-slate-50 flex justify-end">
                   <button 
-                    onClick={() => window.print()}
+                    onClick={handleGenerateReport}
                     className="px-10 py-5 bg-[#A8E6CF] text-[#2D5A4C] rounded-[1.5rem] font-black text-xs uppercase tracking-widest shadow-xl hover:-translate-y-1 transition-all flex items-center gap-3"
                   >
-                    <Download className="w-4 h-4" /> Download Official PDF
+                    <Download className="w-4 h-4" /> Generate FIU-IND STR PDF
                   </button>
                </div>
             </motion.div>

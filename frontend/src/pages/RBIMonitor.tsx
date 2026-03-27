@@ -42,6 +42,41 @@ type CircularCardState = {
   circularText: string | null;
   lastAnalyzedAt: number | null;
   message: string | null; // for empty-state / guard failures
+  complianceScore: number; // Added for direct score tracking
+  gaps: CircularGap[]; // Added for direct gap tracking
+  summary: string; // Added for direct summary tracking
+};
+
+// localStorage keys
+const STORAGE_KEYS = {
+  CIRCULAR_STATES: 'complianceiq-circular-states',
+  LAST_SYNC: 'complianceiq-last-sync'
+};
+
+// Helper functions for localStorage
+const saveToLocalStorage = (states: Record<string, CircularCardState>) => {
+  try {
+    localStorage.setItem(STORAGE_KEYS.CIRCULAR_STATES, JSON.stringify(states));
+    localStorage.setItem(STORAGE_KEYS.LAST_SYNC, Date.now().toString());
+  } catch (error) {
+    console.warn('Failed to save circular states to localStorage:', error);
+  }
+};
+
+const loadFromLocalStorage = (): Record<string, CircularCardState> | null => {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEYS.CIRCULAR_STATES);
+    return stored ? JSON.parse(stored) : null;
+  } catch (error) {
+    console.warn('Failed to load circular states from localStorage:', error);
+    return null;
+  }
+};
+
+const isStateFresh = (lastAnalyzedAt: number | null): boolean => {
+  if (!lastAnalyzedAt) return false;
+  const hoursSinceAnalysis = (Date.now() - lastAnalyzedAt) / (1000 * 60 * 60);
+  return hoursSinceAnalysis < 24; // Consider fresh for 24 hours
 };
 
 const EMPTY_GAP_MESSAGE = 'Upload a circular and activate policies to detect gaps.';
@@ -103,6 +138,13 @@ function getDeadlineCountdown(analysis: CircularAnalysis | null): { days: number
   return bestDays === null ? null : { days: bestDays };
 }
 
+function calculateFallbackScore(analysis: any) {
+  if (!analysis) return 0;
+  if (!analysis.clauses_checked || analysis.clauses_checked === 0) return 0;
+  const covered = analysis.clauses_checked - (analysis.gaps?.length || 0);
+  return Math.round((covered / analysis.clauses_checked) * 100);
+}
+
 export const RBIMonitor: React.FC = () => {
   const { rules, setRules } = useData();
 
@@ -154,8 +196,29 @@ export const RBIMonitor: React.FC = () => {
 
   const [cardState, setCardState] = useState<Record<string, CircularCardState>>(() => {
     const init: Record<string, CircularCardState> = {};
+    
+    // Load saved states from localStorage
+    const savedStates = loadFromLocalStorage();
+    
     for (const c of circulars) {
-      init[c.id] = { status: 'NOT_ANALYZED', analysis: null, circularText: null, lastAnalyzedAt: null, message: null };
+      const savedState = savedStates?.[c.id];
+      
+      if (savedState && savedState.status === 'CLEAR' && isStateFresh(savedState.lastAnalyzedAt)) {
+        // Restore CLEAR state if it's fresh
+        init[c.id] = savedState;
+      } else {
+        // Initialize with defaults
+        init[c.id] = { 
+          status: 'NOT_ANALYZED', 
+          analysis: null, 
+          circularText: null, 
+          lastAnalyzedAt: null, 
+          message: null,
+          complianceScore: 0,
+          gaps: [],
+          summary: ''
+        };
+      }
     }
     return init;
   });
@@ -166,6 +229,11 @@ export const RBIMonitor: React.FC = () => {
 
   const [showSource, setShowSource] = useState(false);
   useEffect(() => setShowSource(false), [selectedCircularId]);
+
+  // Save to localStorage whenever cardState changes
+  useEffect(() => {
+    saveToLocalStorage(cardState);
+  }, [cardState]);
 
   // Panel revalidation can change the circular's status (GAP_FOUND -> CLEAR).
   // We should keep the panel open so judges can visually see the loop close.
@@ -275,8 +343,37 @@ export const RBIMonitor: React.FC = () => {
   const [isAnalyzingAll, setIsAnalyzingAll] = useState(false);
   const [analyzingStep, setAnalyzingStep] = useState(0);
 
+  // Force re-analyze function for CLEAR states
+  async function forceReanalyzeCircular(circularId: string) {
+    // Reset state first
+    setCardState(prev => ({
+      ...prev,
+      [circularId]: { 
+        status: 'NOT_ANALYZED', 
+        analysis: null, 
+        circularText: null, 
+        lastAnalyzedAt: null, 
+        message: null,
+        complianceScore: 0,
+        gaps: [],
+        summary: ''
+      }
+    }));
+    
+    // Then analyze
+    await analyzeCircular(circularId);
+  }
+
   async function analyzeCircular(circularId: string) {
     const currentPolicies = Array.isArray(rules) ? rules : [];
+
+    // Guard: Protect CLEAR states from accidental re-analysis
+    const currentState = cardState[circularId];
+    if (currentState?.status === 'CLEAR' && isStateFresh(currentState.lastAnalyzedAt)) {
+      // Show toast instead of re-analyzing
+      alert('This circular is already marked as CLEAR. Use "Reset & Re-analyze" if you want to force re-analysis.');
+      return;
+    }
 
     // Guard: only run if there is circular text AND active policies to compare.
     // Circular text is server-side; here we ensure active policy rules exist.
@@ -313,15 +410,23 @@ export const RBIMonitor: React.FC = () => {
       const analysis: CircularAnalysis | null = data?.analysis ?? null;
       const circularText: string | null = typeof data?.circularText === 'string' ? data.circularText : null;
 
+      // FIX 3: Correct score extraction and fallback
+      const score = analysis?.compliance_score;
+      const safeScore = (typeof score === 'number' && !isNaN(score)) 
+        ? score 
+        : calculateFallbackScore(analysis);
+
       const rawStatus = typeof analysis?.status === 'string' ? analysis.status.trim().toUpperCase() : '';
       const finalStatus: CircularStatus = rawStatus === 'GAP_FOUND' ? 'GAP_FOUND' : rawStatus === 'CLEAR' ? 'CLEAR' : 'NOT_ANALYZED';
+
+      const finalAnalysis = analysis ? { ...analysis, compliance_score: safeScore } : null;
 
       setCardState(prev => ({
         ...prev,
         [circularId]: {
           ...prev[circularId],
           status: finalStatus,
-          analysis,
+          analysis: finalAnalysis as CircularAnalysis,
           circularText,
           lastAnalyzedAt: Date.now(),
           message: null
@@ -445,6 +550,10 @@ export const RBIMonitor: React.FC = () => {
       // Wait 800ms for context to settle.
       await new Promise(resolve => setTimeout(resolve, 800));
 
+      console.log('=== Starting Revalidation ===');
+      console.log('circularId:', circularId);
+      console.log('addedGapIdsRef.current:', addedGapIdsRef.current);
+
       // FIX 2: Format rules into explicit plain fields for Groq.
       const baseRules = Array.isArray(rules) ? rules : [];
       const allRules = [...baseRules, newRule];
@@ -471,6 +580,8 @@ export const RBIMonitor: React.FC = () => {
         }))
         .slice(0, 200);
 
+      console.log('Sending formatted rules for revalidation:', formattedRules.length);
+
       // FIX 3: Use explicit payload.
       const response = await fetch('http://localhost:3001/api/analyze-circular', {
         method: 'POST',
@@ -483,14 +594,25 @@ export const RBIMonitor: React.FC = () => {
 
       if (!response.ok) {
         const text = await response.text().catch(() => '');
+        console.error('Revalidation API error:', response.status, text);
         throw new Error(`Re-validation failed (${response.status}). ${text}`);
       }
 
       const data = await response.json();
+      console.log('Revalidation response:', data);
       const newAnalysis: CircularAnalysis | null = data?.analysis ?? null;
       const newCircularText: string | null = typeof data?.circularText === 'string' ? data.circularText : null;
 
-      if (!newAnalysis) throw new Error('No analysis returned by backend.');
+      if (!newAnalysis) {
+        console.error('No analysis returned by backend.');
+        throw new Error('No analysis returned by backend.');
+      }
+
+      // FIX 3 (Re-validation): Correct score extraction and fallback
+      const score = newAnalysis?.compliance_score;
+      const safeScore = (typeof score === 'number' && !isNaN(score)) 
+        ? score 
+        : calculateFallbackScore(newAnalysis);
 
       const receivedGaps = Array.isArray(newAnalysis.gaps) ? newAnalysis.gaps : [];
 
@@ -501,9 +623,7 @@ export const RBIMonitor: React.FC = () => {
       const nextComplianceScore =
         filteredGaps.length === 0
           ? 100
-          : typeof newAnalysis.compliance_score === 'number'
-            ? newAnalysis.compliance_score
-            : panelTargetScore;
+          : safeScore;
 
       // Update panel summary + score.
       setPanelSummary(newAnalysis.summary || '');
@@ -596,6 +716,14 @@ export const RBIMonitor: React.FC = () => {
     try {
       for (let i = 0; i < circulars.length; i++) {
         const cid = circulars[i].id;
+        const currentState = cardState[cid];
+        
+        // Skip CLEAR circulars that are still fresh
+        if (currentState?.status === 'CLEAR' && isStateFresh(currentState.lastAnalyzedAt)) {
+          console.log(`Skipping CLEAR circular ${cid}`);
+          continue;
+        }
+        
         setAnalyzingStep(i + 1);
         await analyzeCircular(cid);
       }
@@ -610,8 +738,11 @@ export const RBIMonitor: React.FC = () => {
     ' ' +
     new Date(ts).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 
-  const policyCoverageBarColor = (score: number) => (score > 80 ? 'bg-emerald-400' : score >= 50 ? 'bg-amber-400' : 'bg-rose-400');
-  const policyCoverageBadgeColor = (score: number) => (score > 80 ? 'text-emerald-600' : score >= 50 ? 'text-amber-600' : 'text-rose-600');
+  const policyCoverageBarColor = (score: number) => 
+    score >= 80 ? '#16a34a' : score >= 50 ? '#d97706' : '#dc2626';
+
+  const policyCoverageBadgeColor = (score: number) => 
+    score >= 80 ? 'text-green-600' : score >= 50 ? 'text-amber-600' : 'text-red-600';
 
   // Print template (kept separate so we can control exactly what goes to PDF).
   const printData = useMemo(() => {
@@ -726,8 +857,8 @@ export const RBIMonitor: React.FC = () => {
       <div className="grid grid-cols-1 gap-6">
         {circulars.map((cir, i) => {
           const s = cardState[cir.id];
-          const score = s?.analysis?.compliance_score ?? null;
-          const displayScore = typeof score === 'number' ? (mainScoreDisplayById[cir.id] ?? score) : null;
+          const score = s?.analysis?.compliance_score ?? 0;
+          const displayScore = typeof score === 'number' ? (mainScoreDisplayById[cir.id] ?? score) : 0;
           const countdown = getDeadlineCountdown(s?.analysis ?? null);
           const isProcessing = s?.status === 'PROCESSING';
           const isGap = s?.status === 'GAP_FOUND';
@@ -784,25 +915,29 @@ export const RBIMonitor: React.FC = () => {
 
                   {s?.lastAnalyzedAt && <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{formatMinsAgo(s.lastAnalyzedAt)}</p>}
 
-                  {typeof displayScore === 'number' && (
+                  {s?.analysis && (isGap || isClear) && typeof displayScore === 'number' && (
                     <div className="mt-4 space-y-3">
                       <div className="flex items-center justify-between gap-4">
                         <span className={`text-[10px] font-black uppercase tracking-widest ${policyCoverageBadgeColor(displayScore)}`}>
                           Policy Coverage: {displayScore}%
                         </span>
-                        {countdown && (
-                          <span className="px-3 py-1 bg-amber-50 border border-amber-100 text-amber-700 font-black text-[10px] uppercase rounded-lg">
-                            ⏳ {countdown.days} days to comply
-                          </span>
-                        )}
+                        <span className="text-[9px] text-slate-500 font-medium">
+                          {s.analysis.clauses_covered ?? 0} of {s.analysis.clauses_checked ?? 0} clauses covered
+                        </span>
                       </div>
-                      <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden border border-slate-200">
+                      <div className="relative h-2 bg-slate-100 rounded-full overflow-hidden">
                         <motion.div
+                          className="absolute top-0 left-0 h-full rounded-full"
+                          style={{ backgroundColor: policyCoverageBarColor(displayScore) }}
                           initial={{ width: 0 }}
-                          animate={{ width: `${displayScore}%` }}
-                          transition={{ duration: 0.8, ease: 'easeOut' }}
-                          className={`h-full ${policyCoverageBarColor(displayScore)}`}
+                          animate={{ width: `${Math.max(displayScore, displayScore > 0 ? 2 : 0)}%` }}
+                          transition={{ duration: 0.9, ease: 'easeOut' }}
                         />
+                      </div>
+                      <div className="flex justify-between text-[9px] text-slate-400">
+                        <span>No Coverage</span>
+                        <span>Partial Coverage</span>
+                        <span>Full Coverage</span>
                       </div>
                     </div>
                   )}
@@ -851,10 +986,21 @@ export const RBIMonitor: React.FC = () => {
                 )}
 
                 {isClear && (
-                  <div className="px-5 py-2.5 rounded-2xl font-black uppercase tracking-widest text-[10px] border flex items-center gap-2 border-emerald-100 bg-[#A8E6CF]/10 text-[#2D5A4C]">
-                    <CheckCircle2 className="w-4 h-4" />
-                    ✅ CLEAR
-                  </div>
+                  <>
+                    <div className="px-5 py-2.5 rounded-2xl font-black uppercase tracking-widest text-[10px] border flex items-center gap-2 border-emerald-100 bg-[#A8E6CF]/10 text-[#2D5A4C]">
+                      <CheckCircle2 className="w-4 h-4" />
+                      ✅ CLEAR
+                    </div>
+                    
+                    <button
+                      onClick={() => forceReanalyzeCircular(cir.id)}
+                      className="px-5 py-2.5 rounded-2xl font-black uppercase tracking-widest text-[10px] border flex items-center gap-2 border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 transition-all"
+                      title="Reset to NOT_ANALYZED and run analysis again"
+                    >
+                      <RefreshCcw className="w-3 h-3" />
+                      Reset & Re-analyze
+                    </button>
+                  </>
                 )}
               </div>
             </motion.div>

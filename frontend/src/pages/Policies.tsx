@@ -80,7 +80,7 @@ export const Policies: React.FC = () => {
       newNodes.push({
         id: violId,
         position: { x: 450, y: yOffset },
-        data: { label: `Requirement: ${rule.requirement}` },
+        data: { label: `Obligation (Impact): ${rule.obligation}` },
         style: { ...style, background: '#FFF1F2', color: '#BE123C', borderColor: '#FECDD3' }
       });
 
@@ -160,7 +160,8 @@ export const Policies: React.FC = () => {
                     <div className="flex justify-between items-start">
                       <span className="text-[#2D5A4C] font-black text-xs font-mono bg-emerald-100 py-1 px-3 rounded-lg">{r.clause_id}</span>
                       <div className="flex gap-2">
-                        {r.confidence > 85 ? (
+                        <span className="text-slate-400 font-black text-[9px] uppercase tracking-widest bg-slate-100 py-1 px-3 rounded-lg border border-slate-200">{rule.section_ref || 'GENERAL'}</span>
+                        {rule.confidence > 85 ? (
                           <span className="px-2 py-0.5 bg-emerald-50 text-emerald-600 text-[9px] font-black rounded-lg uppercase tracking-tighter flex items-center gap-1 border border-emerald-100">
                             <ShieldCheck className="w-3 h-3"/> AI Verified
                           </span>
@@ -171,18 +172,24 @@ export const Policies: React.FC = () => {
                         )}
                       </div>
                     </div>
-                    <div className="space-y-4">
-                       <div>
-                         <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest mb-1">Triggering Logic</p>
-                         <p className="text-sm font-bold text-slate-700 leading-relaxed italic">"{r.condition}"</p>
-                       </div>
-                       <div>
-                         <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest mb-1">Impact Enforcement</p>
-                         <p className="text-sm font-black text-slate-800 leading-tight tracking-tight">{r.requirement}</p>
-                       </div>
-                    </div>
+                     <div className="space-y-4">
+                        <div>
+                          <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest mb-1">Triggering Logic (Condition)</p>
+                          <p className="text-sm font-bold text-slate-700 leading-relaxed italic">"{r.condition}"</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest mb-1">Impact Enforcement (Obligation)</p>
+                          <p className="text-sm font-black text-emerald-600 leading-tight tracking-tight">{r.obligation}</p>
+                        </div>
+                        {r.exception && (
+                          <div>
+                            <p className="text-[10px] font-black text-rose-300 uppercase tracking-widest mb-1">Exceptions Identified</p>
+                            <p className="text-sm font-bold text-rose-400 leading-tight tracking-tight italic opacity-80">{r.exception}</p>
+                          </div>
+                        )}
+                     </div>
                     <div className="flex items-center gap-4 pt-4 border-t border-slate-200/50">
-                       <span className="text-[10px] font-black text-slate-400">INDEX CONFIDENCE</span>
+                       <span className="text-[10px] font-black text-slate-400">AI EXTRACTION CONFIDENCE</span>
                        <div className="flex-1 h-1.5 bg-slate-200 rounded-full overflow-hidden">
                           <motion.div initial={{ width: 0 }} animate={{ width: `${r.confidence}%` }} className="h-full bg-[#A8E6CF]" />
                        </div>

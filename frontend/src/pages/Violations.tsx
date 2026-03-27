@@ -1,12 +1,12 @@
 import React, { useState, useMemo } from 'react';
 import { useData } from '../context/DataContext';
-import { Search, Filter, ShieldAlert, ArrowDownUp, ArrowRight, Database, TrendingUp, TrendingDown, Calendar, AlertCircle, DollarSign, Activity } from 'lucide-react';
+import { Search, Filter, ShieldAlert, ArrowDownUp, ArrowRight, Database, TrendingUp, TrendingDown, Calendar, AlertCircle, DollarSign, Activity, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { formatINR, getRiskLevel, getRiskColor } from '../utils/format';
 import { motion } from 'framer-motion';
 
 export const Violations: React.FC = () => {
-  const { transactions } = useData();
+  const { transactions, queryFilter, setQueryFilter } = useData();
   const navigate = useNavigate();
 
   const [search, setSearch] = useState('');
@@ -57,36 +57,59 @@ export const Violations: React.FC = () => {
 
   const filteredResults = useMemo(() => {
     let list = [...violations];
-
-    // Natural Language Query Parsing
     let nlQueryUsed = false;
-    const query = search.toLowerCase();
-    
-    if (query.includes('high risk')) {
-       list = list.filter(t => ['High', 'Critical'].includes(getRiskLevel(t['Amount Paid'])));
-       nlQueryUsed = true;
-    }
-    if (query.includes('structuring') || query.includes('smurfing')) {
-       list = list.filter(t => {
-         const inr = t['Amount Paid'] * 83;
-         return inr >= 800000 && inr <= 1000000;
-       });
-       nlQueryUsed = true;
-    }
-    const aboveMatch = query.match(/(?:above|greater than|more than)\s*(?:rs\.?|inr|₹)?\s*(\d+(?:,\d+)*)/);
-    if (aboveMatch) {
-       const val = parseInt(aboveMatch[1].replace(/,/g, ''));
-       list = list.filter(t => (t['Amount Paid'] * 83) > val);
-       nlQueryUsed = true;
-    }
 
-    // Sidebar Filters (Additive)
-    if (!nlQueryUsed) {
-       list = list.filter(t => riskFilter[getRiskLevel(t['Amount Paid']) as keyof typeof riskFilter]);
-       if (amountRange > 0) {
-         list = list.filter(t => (t['Amount Paid'] * 83) >= amountRange * 100000); 
-       }
-       list = list.filter(t => typeFilter[t['Payment Format']] !== false);
+    // 1. PROJECT GLOBAL NEURAL FILTER (FAST-PATH)
+    if (queryFilter) {
+      console.log('Applying Global Neural Filter:', queryFilter);
+      nlQueryUsed = true;
+      
+      const { filters } = queryFilter;
+      
+      if (filters.risk) {
+        list = list.filter(t => filters.risk!.includes(getRiskLevel(t['Amount Paid'])));
+      }
+      if (filters.minAmount !== undefined) {
+        // Converting back to INR for the UI logic if needed, but QueryEngine already handled demo-scale
+        list = list.filter(t => t['Amount Paid'] >= filters.minAmount!);
+      }
+      if (filters.isLaundering) {
+        list = list.filter(t => t['Is Laundering'] === 1);
+      }
+      if (filters.employeeId) {
+        // Handle accounts as strings or numbers safely
+        list = list.filter(t => String(t.Account) === String(filters.employeeId));
+      }
+    } else {
+      // 2. Fallback to Local Natural Language Query (Legacy)
+      const query = search.toLowerCase();
+      
+      if (query.includes('high risk')) {
+         list = list.filter(t => ['High', 'Critical'].includes(getRiskLevel(t['Amount Paid'])));
+         nlQueryUsed = true;
+      }
+      if (query.includes('structuring') || query.includes('smurfing')) {
+         list = list.filter(t => {
+           const inr = t['Amount Paid'] * 83;
+           return inr >= 800000 && inr <= 1000000;
+         });
+         nlQueryUsed = true;
+      }
+      const aboveMatch = query.match(/(?:above|greater than|more than)\s*(?:rs\.?|inr|₹)?\s*(\d+(?:,\d+)*)/);
+      if (aboveMatch) {
+         const val = parseInt(aboveMatch[1].replace(/,/g, ''));
+         list = list.filter(t => (t['Amount Paid'] * 83) > val);
+         nlQueryUsed = true;
+      }
+
+      // 3. Sidebar Filters (Additive, only if no NL active)
+      if (!nlQueryUsed) {
+         list = list.filter(t => riskFilter[getRiskLevel(t['Amount Paid']) as keyof typeof riskFilter]);
+         if (amountRange > 0) {
+           list = list.filter(t => (t['Amount Paid'] * 83) >= amountRange * 100000); 
+         }
+         list = list.filter(t => typeFilter[t['Payment Format']] !== false);
+      }
     }
 
     if (dateFrom) {
@@ -96,7 +119,7 @@ export const Violations: React.FC = () => {
        list = list.filter(t => new Date(t.Timestamp) <= new Date(dateTo));
     }
 
-    // Keyword Search (Runs on the result of NL/Sidebar filters)
+    // Keyword Search (Secondary refinement)
     let cleanedSearch = search.toLowerCase()
       .replace('show ', '')
       .replace('find ', '')
@@ -136,7 +159,7 @@ export const Violations: React.FC = () => {
     });
 
     return { list, nlQueryUsed };
-  }, [violations, search, sortCol, sortDir, riskFilter, amountRange, typeFilter, dateFrom, dateTo]);
+  }, [violations, search, queryFilter, sortCol, sortDir, riskFilter, amountRange, typeFilter, dateFrom, dateTo]);
 
   const { list: filteredData, nlQueryUsed: nlQueryActive } = filteredResults;
 
@@ -304,8 +327,18 @@ export const Violations: React.FC = () => {
                className="w-full bg-transparent border-none py-4 pl-12 pr-8 text-slate-800 text-lg font-black tracking-tight outline-none placeholder:text-slate-100"
              />
            </div>
-           <div className={`px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest border transition-all ${nlQueryActive ? 'bg-amber-500 text-white border-amber-600 shadow-lg shadow-amber-500/20' : 'bg-[#A8E6CF]/10 text-[#3BB77E] border-[#A8E6CF]/20'}`}>
-              {nlQueryActive ? 'AI Filter Active' : 'AI Query Engine'}
+           <div className={`px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest border transition-all flex items-center gap-3 ${queryFilter ? 'bg-amber-500 text-white border-amber-600 shadow-lg shadow-amber-500/20' : 'bg-[#A8E6CF]/10 text-[#3BB77E] border-[#A8E6CF]/20'}`}>
+              {queryFilter ? (
+                <>
+                  Neural Filter: {queryFilter.label}
+                  <button 
+                   onClick={() => setQueryFilter(null)}
+                   className="ml-2 p-1 bg-white/20 hover:bg-white/40 rounded-lg transition-colors"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </>
+              ) : (nlQueryActive ? 'Local AI Filter Active' : 'AI Search Ready')}
            </div>
         </motion.div>
 

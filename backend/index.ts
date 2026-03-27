@@ -373,89 +373,64 @@ function safeParseJson(input: string) {
   }
 }
 
-const circularSystemPrompt = `You are a senior RBI/SEBI compliance auditor AI.
+const circularSystemPrompt = `You are a senior RBI/SEBI compliance auditor AI tasked with forensic gap analysis.
 
-Analyze the circular clauses against the active policy rules.
+Analyze the circular clauses against the active policy rules with extreme precision.
 
 CLAUSE COUNTING RULES — VERY IMPORTANT:
-- Count ONLY distinct, actionable requirements in the circular
-- Each requirement must be something the bank must DO or COMPLY with
-- Ignore descriptive text, background information, and penalties
-- Each requirement should be specific and measurable
-- Total clauses_checked should typically be between 1-5 for most circulars
+- Count ONLY distinct, actionable requirements in the circular.
+- Ignore historical background, preamble text, and generic warnings.
+- Each clause must represent a specific change in implementation, reporting, or applicability.
+- Total clauses_checked should typically be between 1-5 for most circulars.
 
-STANDARD CLAUSE TYPES:
-1. Implementation requirements (must implement/update/create something)
-2. Deadline requirements (must complete by specific date)
-3. Reporting requirements (must report/notify something)
-4. Compliance requirements (must follow specific guidelines)
-5. Applicability requirements (must apply to specific entities)
+MANDATORY EVIDENCE RULES:
+- For every GAP identified, specify EXACTLY what is missing from the current policy.
+- For every COVERED clause, cite the specific Rule ID from the bank's policy that satisfies it.
+- If a circular modifies a previous master direction, highlight the specific delta (change).
 
-EXAMPLE FOR THIS CIRCULAR:
-- "Regulated entities must ensure KYC updation within one year..." = IMPLEMENTATION + DEADLINE
-- "Low-risk customers may continue transactions" = APPLICABILITY
-- "Non-compliance attracts penalties" = COMPLIANCE (this is informational, not actionable)
+SCORING INSTRUCTIONS:
+- Calculate compliance_score as: Math.round((clauses_covered / clauses_checked) * 100).
+- Be analytical but fair: general policy matches DO count if they provide high-level coverage.
 
-SCORING INSTRUCTIONS — THIS IS MANDATORY:
-- Count the total number of distinct actionable requirements. Call this clauses_checked.
-- Count how many of those requirements are covered by active rules. Call this clauses_covered.
-- Calculate compliance_score EXACTLY as: Math.round((clauses_covered / clauses_checked) * 100)
-- If there are NO active policy rules at all, clauses_covered = 0, compliance_score = 0
-- If ALL clauses are covered, compliance_score = 100, status = CLEAR
-- compliance_score must be a number between 0 and 100, NEVER null, NEVER undefined, NEVER a string
-
-IMPORTANT COVERAGE MATCHING RULES:
-- A requirement is COVERED if there is ANY policy rule whose topic or intent overlaps with the circular requirement.
-- Be GENEROUS in matching — if the policy rule is in the same domain (KYC, AML, risk, reporting) as the circular requirement, count it as covered.
-- General policies DO count as covering specific requirements if they are in the same category.
-- When in doubt, count it as COVERED if the subject matter is related.
-
-EXAMPLES:
-- If circular requires "KYC updation within one year" and there is ANY KYC or customer due-diligence policy rule, it IS covered.
-- If circular requires "AML screening" and policy has any AML or sanctions rule, it IS covered.
-- If circular requires "reporting" and policy has any reporting or compliance rule, it IS covered.
-- Only mark as GAP if there is truly NO policy of any kind that touches the circular's requirement area.
-
-Return ONLY this JSON, no markdown, no extra text:
+Return ONLY this JSON:
 {
   "status": "GAP_FOUND" or "CLEAR",
-  "summary": "one sentence",
+  "summary": "Forensic summary of changes",
   "gaps": [
     {
       "gap_id": "G1",
-      "circular_clause": "Exact clause from circular",
-      "requirement": "What the bank must implement",
-      "severity": "CRITICAL" or "MODERATE" or "ADVISORY",
-      "deadline": "Deadline if mentioned, or null",
-      "remediation": "Exact policy update needed"
+      "circular_clause": "Exact text from circular",
+      "requirement": "Specific implementation need",
+      "severity": "CRITICAL" | "MODERATE" | "ADVISORY",
+      "deadline": "YYYY-MM-DD or null",
+      "remediation": "Instruction to update policy"
     }
   ],
   "compliance_score": <number 0-100>,
-  "clauses_checked": <number, minimum 1, maximum 5>,
+  "clauses_checked": <number>,
   "clauses_covered": <number>
 }`;
 
 const assistantSystemPrompt = `You are "ComplianceIQ AI", an advanced regulatory intelligence assistant.
-Your role: Analyze financial data, RBI/SEBI policies, and queries with precision.
+Your role: Analyze financial data and RBI/SEBI policies with forensic precision.
+
+CRITICAL GROUNDING RULES:
+1. DO NOT use general knowledge to answer questions. 
+2. Use ONLY the provided Transactions and Policy Rules context.
+3. If the context (Transactions/Rules) is empty, do NOT attempt to analyze. Respond with: "I currently have no ingested policy or transaction data to analyze. Please upload a regulatory document (PDF) or a transaction dataset first."
+4. If a question is outside the scope of compliance or the provided data, say: "I can only provide analysis based on the ingested compliance metadata."
 
 CORE BEHAVIOR:
-- Respond in structured BULLET POINTS. 
-- Avoid long paragraphs. Concise, sharp, analytical.
-- Focus on actionable insights.
+- Respond in structured BULLET POINTS. No long paragraphs.
+- ALWAYS cite specific Rule IDs (e.g., #RULE-ID) and transaction amounts.
+- Explain the "WHY" behind risk flags, citing specific regulatory sections if available.
 
 OUTPUT FORMAT:
 1. Summary (1-2 lines)
-2. Key Findings (Bullets)
-3. Risk Indicators (Bullets)
-4. Compliance Check (Violations)
-5. Recommendation (Next action)
-
-ANALYSIS RULES:
-- Identify suspicious patterns (high-value, structuring, anomalies).
-- Compare against policy thresholds.
-- Explain WHY something is risky (not just WHAT).
-- If insufficient data, say: "Insufficient data to conclude"
-- THINK LIKE A COMPLIANCE AUDITOR.`;
+2. Key Findings (Evidence-based bullets)
+3. Risk Indicators (Specific anomalies with values)
+4. Compliance Check (Violations against matched rules)
+5. Recommendation (Actionable next steps)`;
 
 app.post('/api/chat', async (req, res) => {
   try {
@@ -463,12 +438,23 @@ app.post('/api/chat', async (req, res) => {
 
     if (!message) return res.status(400).json({ error: 'Message is required.' });
 
+    // Context Guard: Check if metadata exists
+    const hasTransactions = Array.isArray(transactions) && transactions.length > 0;
+    const hasRules = Array.isArray(rules) && rules.length > 0;
+
+    if (!hasTransactions && !hasRules) {
+      console.log('Chat blocked: No ingested context available.');
+      return res.json({ 
+        response: "**Intelligence Link Alert**: I currently have no ingested policy or transaction data to analyze. Please upload a regulatory document (PDF) or a transaction dataset first to enable compliance analysis." 
+      });
+    }
+
     // Format context for LLM
-    const txnContext = Array.isArray(transactions) && transactions.length > 0
+    const txnContext = hasTransactions
       ? `RECENT TRANSACTIONS (Top 20):\n${JSON.stringify(transactions.slice(0, 20), null, 2)}`
       : 'No transaction data available.';
 
-    const ruleContext = Array.isArray(rules) && rules.length > 0
+    const ruleContext = hasRules
       ? `ACTIVE POLICY RULES:\n${JSON.stringify(rules.map(r => ({ rule_id: r.clause_id || r.rule_id, condition: r.condition, obligation: r.obligation })), null, 2)}`
       : 'No policy rules active.';
 
@@ -476,7 +462,7 @@ app.post('/api/chat', async (req, res) => {
       ? history.map((m: any) => ({ role: m.isUser ? 'user' : 'assistant', content: m.text }))
       : [];
 
-    console.log('Chat request received. Context size:', transactions?.length || 0, 'txns,', rules?.length || 0, 'rules.');
+    console.log('Grounding Check Passed. Context size:', transactions?.length || 0, 'txns,', rules?.length || 0, 'rules.');
 
     const chatCompletion = await groq.chat.completions.create({
       messages: [
@@ -484,13 +470,13 @@ app.post('/api/chat', async (req, res) => {
         ...promptHistory,
         { role: 'user', content: message }
       ],
-      model: 'llama-3.1-70b-versatile', // Using larger model for reasoning
-      temperature: 0.2,
+      model: 'llama-3.1-8b-instant', // Switched to high-throughput model to resolve 429 rate limits
+      temperature: 0.1, // Lower temperature for stricter grounding
       max_tokens: 1500
     });
 
     const response = chatCompletion.choices[0]?.message?.content || "I am unable to analyze that request at the moment.";
-    console.log('Assistant response generated.');
+    console.log('Assistant grounded response generated.');
 
     res.json({ response });
 
@@ -601,7 +587,7 @@ Return the gap analysis JSON.`;
           { role: 'system', content: circularSystemPrompt },
           { role: 'user', content: userMessage }
         ],
-        model: 'llama-3.1-8b-instant', // Changed to smaller model to avoid rate limits
+        model: 'llama-3.1-8b-instant', // Switched to high-throughput model to resolve 429 rate limits
         temperature: 0.1,
         max_tokens: 1000,
         response_format: { type: 'json_object' }

@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
 import Papa from 'papaparse';
 import type { Transaction, Rule } from '../types';
+import { type FilterIntent } from '../utils/QueryEngine';
 
 interface PolicyThresholds {
   aml: number;
@@ -21,6 +22,8 @@ interface DataContextType {
   policiesAnalyzed: number;
   policyThresholds: PolicyThresholds | null;
   setPolicyThresholds: React.Dispatch<React.SetStateAction<PolicyThresholds | null>>;
+  queryFilter: FilterIntent | null;
+  setQueryFilter: React.Dispatch<React.SetStateAction<FilterIntent | null>>;
 }
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
@@ -32,6 +35,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [rules, setRules] = useState<Rule[]>([]);
   const [policiesAnalyzed] = useState(1); // Default to 1
   const [policyThresholds, setPolicyThresholds] = useState<PolicyThresholds | null>(null);
+  const [queryFilter, setQueryFilter] = useState<FilterIntent | null>(null);
 
   const addRule = (rule: Rule) => {
     setRules(prev => [...prev, rule]);
@@ -86,7 +90,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setError, 
       policiesAnalyzed,
       policyThresholds,
-      setPolicyThresholds
+      setPolicyThresholds,
+      queryFilter,
+      setQueryFilter
     }}>
       {children}
     </DataContext.Provider>

@@ -28,12 +28,13 @@ Each rule object must have:
 - obligation: string (The action, e.g., "report_to_FIU_within_days:7")
 - exception: string or null (Exemptions, e.g., "account_type == 'government'")
 - section_ref: string (The original manual/section number, e.g., "Section 3.1.2")
+- confidence: number (Probability score 0-100)
 - parent_id: string or null (If this rule depends on or references a previous clause_id)
 
 Example format:
 {
   "rules": [
-    { "clause_id": "AML-003", "condition": "transaction_amount > 1000000", "obligation": "report_to_FIU_within_days:7", "exception": "account_type == 'government'", "section_ref": "Section 3.1.2", "parent_id": null }
+    { "clause_id": "AML-003", "condition": "transaction_amount > 1000000", "obligation": "report_to_FIU_within_days:7", "exception": "account_type == 'government'", "section_ref": "Section 3.1.2", "confidence": 98, "parent_id": null }
   ]
 }`;
 

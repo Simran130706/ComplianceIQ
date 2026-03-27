@@ -2,6 +2,12 @@ import React, { createContext, useContext, useState, useEffect, type ReactNode }
 import Papa from 'papaparse';
 import type { Transaction, Rule } from '../types';
 
+interface PolicyThresholds {
+  aml: number;
+  cash: number;
+  structuring: number;
+}
+
 interface DataContextType {
   transactions: Transaction[];
   loading: boolean;
@@ -12,6 +18,8 @@ interface DataContextType {
   setLoading: React.Dispatch<React.SetStateAction<boolean>>;
   setError: React.Dispatch<React.SetStateAction<string | null>>;
   policiesAnalyzed: number;
+  policyThresholds: PolicyThresholds | null;
+  setPolicyThresholds: React.Dispatch<React.SetStateAction<PolicyThresholds | null>>;
 }
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
@@ -22,6 +30,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [error, setError] = useState<string | null>(null);
   const [rules, setRules] = useState<Rule[]>([]);
   const [policiesAnalyzed] = useState(1); // Default to 1
+  const [policyThresholds, setPolicyThresholds] = useState<PolicyThresholds | null>(null);
 
   useEffect(() => {
     async function loadData() {
@@ -69,7 +78,9 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setTransactions, 
       setLoading, 
       setError, 
-      policiesAnalyzed 
+      policiesAnalyzed,
+      policyThresholds,
+      setPolicyThresholds
     }}>
       {children}
     </DataContext.Provider>

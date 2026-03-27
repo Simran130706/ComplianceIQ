@@ -21,7 +21,7 @@ const upload = multer({ dest: 'uploads/' });
 const groq = new Groq();
 
 const systemPrompt = `You are a compliance rule extractor for Indian banking. Extract every enforceable rule from this policy document. 
-Return the output as a JSON object with a key "rules" which is an array of rule objects.
+Return output as a JSON object with a key "rules" which is an array of rule objects.
 Each rule object must have:
 - clause_id: string (e.g., "AML-001")
 - condition: string (The trigger, e.g., "transaction_amount > 1000000")
@@ -36,6 +36,20 @@ Example format:
   "rules": [
     { "clause_id": "AML-003", "condition": "transaction_amount > 1000000", "obligation": "report_to_FIU_within_days:7", "exception": "account_type == 'government'", "section_ref": "Section 3.1.2", "confidence": 98, "parent_id": null }
   ]
+}`;
+
+const thresholdPrompt = `You are a compliance threshold extractor for Indian banking regulations. Extract only the monetary threshold values from this policy document.
+Return output as a JSON object with these exact keys:
+- aml: number (AML transaction threshold in INR)
+- cash: number (Cash transaction threshold in INR) 
+- structuring: number (Structuring threshold in INR)
+
+If a threshold is not found, set it to null. Only return actual numerical values found in the document.
+Example format:
+{
+  "aml": 1000000,
+  "cash": 500000,
+  "structuring": 300000
 }`;
 
 app.post('/api/extract-rules', upload.single('policy'), async (req, res) => {
@@ -99,6 +113,68 @@ app.post('/api/extract-rules', upload.single('policy'), async (req, res) => {
 
   } catch (error: any) {
     console.error('Error during extraction:', error.message || error);
+    res.status(500).json({ error: error.message || 'Internal server error.' });
+  }
+});
+
+// New endpoint for threshold extraction specifically for simulator
+app.post('/api/extract-thresholds', upload.single('policy'), async (req, res) => {
+  try {
+    console.log("Threshold extraction request received");
+    if (!req.file) {
+      console.error("No file in request");
+      return res.status(400).json({ error: 'No PDF file uploaded.' });
+    }
+
+    const dataBuffer = fs.readFileSync(req.file.path);
+    console.log("PDF file read, size:", dataBuffer.length);
+    
+    // Extract text from PDF
+    const data = await pdfParse(dataBuffer);
+    const pdfText = data.text;
+    console.log("PDF text extracted, characters:", pdfText.length);
+
+    if (pdfText.trim().length === 0) {
+      throw new Error("Extracted PDF text is empty.");
+    }
+
+    // Clean up uploaded file
+    fs.unlinkSync(req.file.path);
+
+    // Call Groq API for threshold extraction
+    console.log("Calling Groq API for threshold extraction...");
+    const chatCompletion = await groq.chat.completions.create({
+      messages: [
+        { role: 'system', content: thresholdPrompt },
+        { role: 'user', content: `Extract threshold values from this text:\n\n${pdfText.slice(0, 30000)}` } // Safety slice
+      ],
+      model: 'llama-3.3-70b-versatile',
+      temperature: 0,
+      response_format: { type: 'json_object' }
+    });
+
+    const responseContent = chatCompletion.choices[0]?.message?.content || '{}';
+    console.log("Groq threshold response received");
+    
+    let extractedThresholds = { aml: null, cash: null, structuring: null };
+    try {
+      const parsed = JSON.parse(responseContent);
+      console.log("Threshold response parsed successfully");
+      extractedThresholds = {
+        aml: parsed.aml || null,
+        cash: parsed.cash || null,
+        structuring: parsed.structuring || null
+      };
+    } catch(e) {
+      console.error("Failed to parse threshold response JSON. Content:", responseContent);
+      return res.status(500).json({ error: 'Failed to process AI response.', raw: responseContent });
+    }
+
+    console.log("Sending extracted thresholds:", extractedThresholds);
+    res.json(extractedThresholds);
+
+  } catch (error: any) {
+    console.error('Error during threshold extraction:', error.message || error);
     res.status(500).json({ error: error.message || 'Internal server error.' });
   }
 });

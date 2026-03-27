@@ -1,0 +1,8 @@
+SEBI Circular SEBI/IT/2024/012 dated January 15, 2024
+Subject: Insider Trading Surveillance and Reporting Obligations
+
+1. All trading members must implement automated surveillance for UPSI leakage detection.
+2. Trades by designated persons within 30 days before/after board meetings must be auto-flagged and reported within 2 hours.
+3. Digital communications on non-approved platforms by designated persons must be flagged as potential UPSI leakage.
+4. Minimum holding period of 6 months for ESOPs before sale. Violations attract SEBI penalty of 3x profit made.
+5. Compliance officer must file disclosure within 2 trading days of any insider trade detection.

@@ -1,0 +1,8 @@
+RBI Circular RBI/AML/2024/156 dated March 14, 2024
+Subject: Revised AML Reporting Thresholds for Digital Payment Transactions
+
+1. All Regulated Entities shall report cash transactions above INR 10,00,000 within 7 working days to FIU-IND.
+2. Digital payment transactions above INR 5,00,000 in a single session across UPI, IMPS, NEFT must be flagged for enhanced due diligence.
+3. Structuring of transactions to avoid threshold reporting is prohibited under PMLA Section 12. Penalty: INR 1,00,000 per violation per day.
+4. Banks must maintain transaction trail for minimum 10 years for AML audit purposes.
+5. Real-time STR must be filed within 24 hours of detection.

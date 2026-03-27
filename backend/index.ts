@@ -5,8 +5,13 @@ import pdfParse from 'pdf-parse';
 import { Groq } from 'groq-sdk';
 import dotenv from 'dotenv';
 import fs from 'fs';
+import path from 'path';
 
+// Load environment variables from .env file
 dotenv.config();
+
+// Debug: Check if API key is loaded
+console.log('GROQ_API_KEY loaded:', process.env.GROQ_API_KEY ? 'YES' : 'NO');
 
 const app = express();
 const port = 3001;
@@ -61,32 +66,74 @@ app.post('/api/extract-rules', upload.single('policy'), async (req, res) => {
       return res.status(400).json({ error: 'No PDF file uploaded.' });
     }
 
+    // Validate file extension
+    if (!req.file.originalname.toLowerCase().endsWith('.pdf')) {
+      console.error("Invalid file type:", req.file.originalname);
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: 'Only PDF files are allowed.' });
+    }
+
     const dataBuffer = fs.readFileSync(req.file.path);
     console.log("PDF file read, size:", dataBuffer.length);
     
-    // Extract text from PDF
-    const data = await pdfParse(dataBuffer);
-    const pdfText = data.text;
-    console.log("PDF text extracted, characters:", pdfText.length);
+    // Validate PDF file header
+    if (dataBuffer.length < 5 || !dataBuffer.toString('utf8', 0, 5).includes('%PDF')) {
+      console.error("Invalid PDF header detected");
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: 'Invalid PDF file format.' });
+    }
+    
+    // Extract text from PDF with enhanced error handling
+    let pdfText = '';
+    try {
+      const data = await pdfParse(dataBuffer);
+      pdfText = data.text;
+      console.log("PDF text extracted, characters:", pdfText.length);
+    } catch (pdfError: any) {
+      console.error("PDF parsing failed:", pdfError.message);
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({ 
+        error: 'Failed to parse PDF file. Please ensure it is a valid, non-corrupted PDF.',
+        details: pdfError.message 
+      });
+    }
 
     if (pdfText.trim().length === 0) {
-      throw new Error("Extracted PDF text is empty.");
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: 'PDF file appears to be empty or contains no extractable text.' });
     }
 
     // Clean up uploaded file
     fs.unlinkSync(req.file.path);
 
     // Call Groq API
-    console.log("Calling Groq API with model llama-3.3-70b-versatile...");
-    const chatCompletion = await groq.chat.completions.create({
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: `Extract rules from this text:\n\n${pdfText.slice(0, 30000)}` } // Safety slice
-      ],
-      model: 'llama-3.3-70b-versatile',
-      temperature: 0,
-      response_format: { type: 'json_object' }
-    });
+    console.log("Calling Groq API with model llama-3.1-8b-instant...");
+    let chatCompletion;
+    try {
+      chatCompletion = await groq.chat.completions.create({
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: `Extract rules from this text:\n\n${pdfText.slice(0, 30000)}` } // Safety slice
+        ],
+        model: 'llama-3.1-8b-instant', // Changed to smaller model to avoid rate limits
+        temperature: 0,
+        response_format: { type: 'json_object' }
+      });
+    } catch (groqError: any) {
+      console.error("Groq API call failed:", groqError.message);
+      let errorMessage = 'AI service temporarily unavailable. Please try again.';
+      
+      if (groqError.message.includes('rate limit') || groqError.message.includes('429')) {
+        errorMessage = 'AI rate limit exceeded. Please wait a few minutes and try again.';
+      } else if (groqError.message.includes('API key')) {
+        errorMessage = 'Invalid API key. Please check your GROQ_API_KEY.';
+      }
+      
+      return res.status(500).json({ 
+        error: errorMessage,
+        details: groqError.message 
+      });
+    }
 
     const responseContent = chatCompletion.choices[0]?.message?.content || '{}';
     console.log("Groq response received");
@@ -129,7 +176,7 @@ app.post('/api/extract-thresholds', upload.single('policy'), async (req, res) =>
 
     const dataBuffer = fs.readFileSync(req.file.path);
     console.log("PDF file read, size:", dataBuffer.length);
-    
+
     // Extract text from PDF
     const data = await pdfParse(dataBuffer);
     const pdfText = data.text;
@@ -147,7 +194,7 @@ app.post('/api/extract-thresholds', upload.single('policy'), async (req, res) =>
     const chatCompletion = await groq.chat.completions.create({
       messages: [
         { role: 'system', content: thresholdPrompt },
-        { role: 'user', content: `Extract threshold values from this text:\n\n${pdfText.slice(0, 30000)}` } // Safety slice
+        { role: 'user', content: `Extract threshold values from this text:\n\n${pdfText.slice(0, 30000)}` }
       ],
       model: 'llama-3.3-70b-versatile',
       temperature: 0,
@@ -156,7 +203,7 @@ app.post('/api/extract-thresholds', upload.single('policy'), async (req, res) =>
 
     const responseContent = chatCompletion.choices[0]?.message?.content || '{}';
     console.log("Groq threshold response received");
-    
+
     let extractedThresholds = { aml: null, cash: null, structuring: null };
     try {
       const parsed = JSON.parse(responseContent);
@@ -166,7 +213,7 @@ app.post('/api/extract-thresholds', upload.single('policy'), async (req, res) =>
         cash: parsed.cash || null,
         structuring: parsed.structuring || null
       };
-    } catch(e) {
+    } catch (e) {
       console.error("Failed to parse threshold response JSON. Content:", responseContent);
       return res.status(500).json({ error: 'Failed to process AI response.', raw: responseContent });
     }
@@ -197,14 +244,13 @@ Your expertise includes:
 app.post('/api/chat', async (req, res) => {
   try {
     const { message, history, transactions, rules } = req.body;
-    
+
     if (!message) {
       return res.status(400).json({ error: 'Message is required.' });
     }
 
     console.log("Chat request received (Data-Aware):", message);
 
-    // Prepare context-aware prompt
     const dataContext = `
     CURRENT DATASET CONTEXT:
     - Total Transactions Loaded: ${transactions?.length || 0}
@@ -223,13 +269,13 @@ app.post('/api/chat', async (req, res) => {
     const chatCompletion = await groq.chat.completions.create({
       messages,
       model: 'llama-3.3-70b-versatile',
-      temperature: 0.1, // Lower temperature for more accurate data facts
+      temperature: 0.1,
       max_tokens: 2048
     });
 
     const response = chatCompletion.choices[0]?.message?.content || "I'm sorry, I couldn't process that request.";
     console.log("Chat response generated successfully (with context)");
-    
+
     res.json({ response });
 
   } catch (error: any) {
@@ -238,6 +284,201 @@ app.post('/api/chat', async (req, res) => {
   }
 });
 
+function stripJsonFences(input: string) {
+  return input
+    .replace(/```(?:json)?/gi, '')
+    .replace(/```/g, '')
+    .trim();
+}
+
+function safeParseJson(input: string) {
+  const cleaned = stripJsonFences(input);
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    const firstBrace = cleaned.indexOf('{');
+    const lastBrace = cleaned.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+      return JSON.parse(cleaned.slice(firstBrace, lastBrace + 1));
+    }
+    throw new Error('Failed to parse Groq response as JSON.');
+  }
+}
+
+const circularSystemPrompt = `You are a senior RBI/SEBI compliance auditor AI.
+
+You will be given:
+1) A regulatory circular text
+2) A bank's currently active policy rules
+
+IMPORTANT MATCHING INSTRUCTIONS:
+- A gap is ONLY valid if there is absolutely NO rule in the active policies that addresses the same requirement.
+- If a rule exists that covers the same topic, intent, or threshold as a circular clause — even if worded differently — it is NOT a gap.
+- Rules added from "RBI Monitor" are FULLY VALID policy rules.
+- Match by INTENT and TOPIC, not just exact wording.
+- If a rule's "policy_name" or "condition" field covers the circular clause requirement, mark that clause as COVERED.
+
+Return ONLY a JSON object in this exact format, no extra text, no markdown:
+{
+  "status": "GAP_FOUND" or "CLEAR",
+  "summary": "One sentence summary of the gap analysis",
+  "gaps": [
+    {
+      "gap_id": "G1",
+      "circular_clause": "Exact clause from circular",
+      "requirement": "What the bank must implement",
+      "severity": "CRITICAL" or "MODERATE" or "ADVISORY",
+      "deadline": "Deadline if mentioned, or null",
+      "remediation": "Exact policy update needed"
+    }
+  ],
+  "compliance_score": 0,
+  "clauses_checked": 0,
+  "clauses_covered": 0
+}
+
+If all clauses are covered, return status CLEAR with empty gaps array.`;
+
+app.post('/api/analyze-circular', async (req, res) => {
+  try {
+    console.log('=== Circular Analysis Request ===');
+    const { circularId, activePolicyRules } = req.body as {
+      circularId?: string;
+      activePolicyRules?: unknown;
+    };
+
+    console.log('Request body:', {
+      circularId,
+      activePolicyRulesCount: Array.isArray(activePolicyRules) ? activePolicyRules.length : 'N/A'
+    });
+
+    if (!circularId || typeof circularId !== 'string') {
+      console.error('Missing or invalid circularId:', circularId);
+      return res.status(400).json({ error: 'circularId is required and must be a string.' });
+    }
+
+    const circularFileMap: Record<string, string> = {
+      'RBI/2025-26/53': 'RBI_2025_26_53.txt',
+      'RBI/2025-26/51': 'RBI_2025_26_51.txt',
+      'RBI/2025-26/75': 'RBI_2025_26_75.txt',
+      'RBI/2025-26/242': 'RBI_2025_26_242.txt'
+    };
+
+    const fileName = circularFileMap[circularId];
+    if (!fileName) {
+      console.error('Unknown circularId:', circularId);
+      return res.status(400).json({
+        error: `Unknown circularId: ${circularId}. Available IDs: ${Object.keys(circularFileMap).join(', ')}`
+      });
+    }
+
+    const circularPath = path.join(__dirname, 'circulars', fileName);
+    console.log('Reading circular from:', circularPath);
+
+    if (!fs.existsSync(circularPath)) {
+      console.error('Circular file missing:', circularPath);
+      return res.status(500).json({ error: `Circular text file missing on server: ${fileName}` });
+    }
+
+    const circularText = fs.readFileSync(circularPath, 'utf-8');
+    if (!circularText || circularText.trim().length === 0) {
+      console.error('Circular text is empty:', fileName);
+      return res.status(500).json({ error: 'Circular text is empty.' });
+    }
+
+    console.log('Circular text loaded successfully, length:', circularText.length);
+
+    const policyRulesArray = Array.isArray(activePolicyRules) ? activePolicyRules : [];
+    console.log('Processing', policyRulesArray.length, 'policy rules');
+
+    const formattedRulesText = policyRulesArray
+      .map((r: any, i: number) => {
+        const ruleId = r?.rule_id ?? r?.ruleId ?? r?.clause_id ?? '';
+        const policyName = r?.policy_name ?? r?.policyName ?? r?.name ?? r?.clause_id ?? `Rule_${i + 1}`;
+        const condition = r?.condition ?? '';
+        const source = r?.source ?? 'Internal Policy';
+        const addedFrom = r?.added_from ?? r?.addedFrom ?? 'Policy Manager';
+        const active = r?.active !== false;
+        return `Rule ${i + 1}:
+  policy_name: "${policyName}"
+  rule_id: "${ruleId}"
+  condition: "${condition}"
+  source: "${source}"
+  added_from: "${addedFrom}"
+  active: ${active}`;
+      })
+      .join('\n\n');
+
+    const userMessage = `REGULATORY CIRCULAR (Circular ID: ${circularId}):
+${circularText}
+
+BANK'S CURRENTLY ACTIVE POLICY RULES (${policyRulesArray.length} rules):
+${formattedRulesText}
+
+TASK:
+Check every clause in the circular against ALL rules listed above.
+A clause is COVERED if ANY rule above addresses the same topic or requirement.
+A clause is a GAP only if NO rule above covers it at all.
+Be generous in matching — if intent matches, it is covered.
+Return the gap analysis JSON.`;
+
+    console.log('Calling Groq API for circular analysis...');
+    let chatCompletion;
+    try {
+      chatCompletion = await groq.chat.completions.create({
+        messages: [
+          { role: 'system', content: circularSystemPrompt },
+          { role: 'user', content: userMessage }
+        ],
+        model: 'llama-3.1-8b-instant',
+        temperature: 0.1,
+        max_tokens: 1000,
+        response_format: { type: 'json_object' }
+      });
+    } catch (groqError: any) {
+      console.error('Groq API call failed:', groqError.message);
+      let errorMessage = 'AI service temporarily unavailable. Please try again.';
+
+      if (groqError.message.includes('rate limit') || groqError.message.includes('429')) {
+        errorMessage = 'AI rate limit exceeded. Please wait a few minutes and try again.';
+      } else if (groqError.message.includes('API key')) {
+        errorMessage = 'Invalid API key. Please check your GROQ_API_KEY.';
+      }
+
+      return res.status(500).json({
+        error: errorMessage,
+        details: groqError.message
+      });
+    }
+
+    const responseContent = chatCompletion.choices[0]?.message?.content || '';
+    console.log('Groq response received, length:', responseContent.length);
+
+    let analysis;
+    try {
+      analysis = safeParseJson(responseContent);
+      console.log('Response parsed successfully');
+    } catch (parseError: any) {
+      console.error('Failed to parse Groq response:', parseError.message);
+      console.error('Raw response:', responseContent);
+      return res.status(500).json({
+        error: 'Failed to process AI response. Invalid JSON format.',
+        details: parseError.message,
+        rawResponse: responseContent
+      });
+    }
+
+    console.log('Analysis completed successfully');
+    return res.json({ circularId, analysis, circularText });
+  } catch (error: any) {
+    console.error('Unexpected error during circular analysis:', error?.message || error);
+    console.error('Stack trace:', error?.stack);
+    return res.status(500).json({
+      error: 'Internal server error during circular analysis.',
+      details: error?.message || 'Unknown error'
+    });
+  }
+});
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' });
 });

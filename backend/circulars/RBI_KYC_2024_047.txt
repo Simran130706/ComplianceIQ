@@ -1,0 +1,8 @@
+RBI Circular RBI/KYC/2024/047 dated February 28, 2024
+Subject: Enhanced KYC Requirements for NRI Account Operations
+
+1. All NRI accounts must complete Video KYC re-verification by June 30, 2024.
+2. Overseas address proof must be updated every 2 years. Dormant NRI accounts with outdated KYC must be frozen.
+3. NRI accounts with transactions above INR 15,00,000 require source-of-funds declaration within 48 hours.
+4. PAN-Aadhaar linkage is mandatory for all NRI accounts by March 31, 2024. Non-compliance results in account freeze.
+5. FEMA compliance report must be submitted quarterly for NRI accounts exceeding aggregate balance of INR 50,00,000.

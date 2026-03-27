@@ -14,6 +14,7 @@ interface DataContextType {
   error: string | null;
   rules: Rule[];
   setRules: React.Dispatch<React.SetStateAction<Rule[]>>;
+  addRule: (rule: Rule) => void;
   setTransactions: React.Dispatch<React.SetStateAction<Transaction[]>>;
   setLoading: React.Dispatch<React.SetStateAction<boolean>>;
   setError: React.Dispatch<React.SetStateAction<string | null>>;
@@ -31,6 +32,10 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [rules, setRules] = useState<Rule[]>([]);
   const [policiesAnalyzed] = useState(1); // Default to 1
   const [policyThresholds, setPolicyThresholds] = useState<PolicyThresholds | null>(null);
+
+  const addRule = (rule: Rule) => {
+    setRules(prev => [...prev, rule]);
+  };
 
   useEffect(() => {
     async function loadData() {
@@ -75,6 +80,7 @@ export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       error, 
       rules, 
       setRules, 
+      addRule,
       setTransactions, 
       setLoading, 
       setError, 

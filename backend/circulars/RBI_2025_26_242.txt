@@ -1,0 +1,5 @@
+RBI/2025-26/242
+Frauds Classification and Reporting by Regulated Entities
+11 March 2026
+
+Updated framework for fraud classification, monitoring, and reporting. All frauds above ₹1 lakh must be reported to RBI within 7 days via FMR-1. Frauds above ₹1 crore require immediate CEO-level escalation and board reporting within 30 days. Regulated entities must maintain a Fraud Risk Management Policy approved by the Board. Staff accountability framework must be implemented. Applicable to all SCBs, UCBs, NBFCs, and payment system operators.

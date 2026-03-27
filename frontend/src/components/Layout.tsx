@@ -2,6 +2,7 @@ import React from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Navbar } from './Navbar';
+import { AIAssistant } from './AIAssistant';
 
 export const Layout: React.FC = () => {
   const location = useLocation();
@@ -12,6 +13,7 @@ export const Layout: React.FC = () => {
         <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-emerald-50 rounded-full blur-[120px] -z-1" />
         <div className="absolute bottom-0 left-0 w-[500px] h-[500px] bg-[#A8E6CF]/10 rounded-full blur-[120px] -z-1" />
         <Outlet />
+        <AIAssistant />
       </main>
     );
   }
@@ -47,6 +49,9 @@ export const Layout: React.FC = () => {
           <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">© 2026 Secured Compliance Intelligence Portal</p>
         </div>
       </footer>
+
+      {/* Floating AI Assistant Widget */}
+      <AIAssistant />
     </div>
   );
 };

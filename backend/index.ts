@@ -12,7 +12,8 @@ const app = express();
 const port = 3001;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 const upload = multer({ dest: 'uploads/' });
 
@@ -179,7 +180,64 @@ app.post('/api/extract-thresholds', upload.single('policy'), async (req, res) =>
   }
 });
 
-// A second endpoint for health check
+// AI Chat Endpoint
+const chatSystemPrompt = `You are "ComplianceIQ AI", a high-speed regulatory assistant. 
+STRICT REQUIREMENTS FOR ANSWERS:
+- ALWAYS use concise bullet points.
+- NEVER write long paragraphs.
+- Keep answers ultra-concise and less detailed.
+- Deliver only the most critical data/logic facts from the provided context.
+- Use a "Rapid Audit" style.
+
+Your expertise includes:
+- RBI Master Directions & Circulars
+- PMLA, KYC, and AML detection logic
+- Transaction-based forensic analysis`;
+
+app.post('/api/chat', async (req, res) => {
+  try {
+    const { message, history, transactions, rules } = req.body;
+    
+    if (!message) {
+      return res.status(400).json({ error: 'Message is required.' });
+    }
+
+    console.log("Chat request received (Data-Aware):", message);
+
+    // Prepare context-aware prompt
+    const dataContext = `
+    CURRENT DATASET CONTEXT:
+    - Total Transactions Loaded: ${transactions?.length || 0}
+    - Total Policy Rules Extracted: ${rules?.length || 0}
+    
+    ${transactions ? `SAMPLE DATA (First 100 Rows): ${JSON.stringify(transactions.slice(0, 100))}` : 'No transaction data available.'}
+    ${rules ? `SYSTEM RULES: ${JSON.stringify(rules.slice(0, 20))}` : 'No rules available.'}
+    `;
+
+    const messages = [
+      { role: 'system', content: chatSystemPrompt + "\n\n" + dataContext },
+      ...(history || []).map((h: any) => ({ role: h.isUser ? 'user' : 'assistant', content: h.text })),
+      { role: 'user', content: message }
+    ];
+
+    const chatCompletion = await groq.chat.completions.create({
+      messages,
+      model: 'llama-3.3-70b-versatile',
+      temperature: 0.1, // Lower temperature for more accurate data facts
+      max_tokens: 2048
+    });
+
+    const response = chatCompletion.choices[0]?.message?.content || "I'm sorry, I couldn't process that request.";
+    console.log("Chat response generated successfully (with context)");
+    
+    res.json({ response });
+
+  } catch (error: any) {
+    console.error('Error during chat:', error.message || error);
+    res.status(500).json({ error: 'AI Assistant failed to analyze the dataset.' });
+  }
+});
+
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' });
 });

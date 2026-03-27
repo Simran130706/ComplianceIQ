@@ -4,7 +4,7 @@
   "description": "Compliance IQ Backend",
   "main": "index.ts",
   "scripts": {
-    "dev": "powershell -Command \"Stop-Process -Id (Get-NetTCPConnection -LocalPort 3001).OwningProcess -Force -ErrorAction SilentlyContinue; tsx index.ts\"",
+    "dev": "tsx --watch index.ts",
     "start": "tsx index.ts"
   },
   "dependencies": {

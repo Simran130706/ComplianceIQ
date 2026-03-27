@@ -154,66 +154,62 @@ export const Compliance: React.FC = () => {
 
       // 1. Evaluate every Rule from the PDF against the transaction
       rules.forEach(rule => {
-        const id = rule.clause_id;
-        const text = (rule.clause_id + ' ' + (rule.section_ref || '') + ' ' + rule.condition + ' ' + rule.obligation + ' ' + (rule.exception || '')).toLowerCase();
+        const id = (rule.clause_id || '').toLowerCase();
+        const text = (rule.clause_id + ' ' + (rule.section_ref || '') + ' ' + rule.condition + ' ' + rule.obligation).toLowerCase();
         
         let triggered = false;
-        let specificReason = '';
+        let reason = '';
 
-        // -- MAPPING: Categorize Rule into exactly ONE detection category to prevent 'everyone triggers everything'
-        
-        // Category 1: Large Threshold (Section 3.1 & 4.2)
+        // -- MAPPING: Strictly assign rule to ONE forensic behavioral category to ensure 'variety' in the dashboard stats --
+
+        // A. Large Thresholds (The Big Fish)
         if (id.includes('3.1') || id.includes('4.2') || text.includes('10,000') || text.includes('2,00,000')) {
-           const thresh = text.includes('2,00,000') ? 2410 : 10000; 
-           if (amount >= thresh && (isLaundering || format.toLowerCase().includes('cash'))) {
+           if (amount > 10000 && (isLaundering || format.toLowerCase().includes('cash'))) { 
               triggered = true;
-              specificReason = `Financial Breach: Amount INR ${Math.round(amount * 83).toLocaleString()} violates the PMLA hard limit specified in Rule ${id}.`;
+              reason = `Threshold Breach: Large value of INR ${Math.round(amount * 83).toLocaleString()} violates PMLA Clause ${id}.`;
            }
         }
-        // Category 2: Structuring / Pattern (Section 3.2 & 5.2)
-        else if (id.includes('3.2') || id.includes('5.2') || text.includes('structuring')) {
-           const isLowInRange = amount >= 8000 && amount <= 9999;
-           const isExactRound = amount % 1000 === 0 && amount > 5000;
-           if (isLowInRange || isExactRound) {
+        // B. Structuring / Smurfing (Under-the-Radar)
+        else if (id.includes('3.2') || text.includes('structuring')) {
+           const inSmurfingRange = amount >= 8000 && amount <= 9999;
+           if (inSmurfingRange) {
               triggered = true;
-              specificReason = `Structuring Match: Identified deliberate smurfing pattern of INR ${Math.round(amount * 83).toLocaleString()} under Section 3.2 logic.`;
+              reason = `Structuring Match: Targeted Smurfing pattern Identified under Section 3.2 logic.`;
            }
         }
-        // Category 3: Velocity (Section 3.3)
+        // C. Velocity / Frequency (Spammy accounts)
         else if (id.includes('3.3') || text.includes('24 hour') || text.includes('succession')) {
-           const daily = accountDailyTxns[acc]?.[dateDay] || 0;
-           if (daily > 10) { 
+           const dailyCount = accountDailyTxns[acc]?.[dateDay] || 0;
+           if (dailyCount > 10) { 
               triggered = true;
-              specificReason = `Velocity Limit: Account ${acc} initiated ${daily} transactions in 24 hours, breaching Section 3.3.`;
+              reason = `Velocity Violation: ${dailyCount} transactions in 24h cycle (Breach of Section 3.3).`;
            }
         }
-        // Category 4: KYC / Cross-Border (Section 4.1)
-        else if (id.includes('4.1') || text.includes('kyc') || text.includes('cross-border')) {
-           if (t['Payment Currency'] !== 'US Dollar' && amount > 600) {
+        // D. Cross-Border / KYC (International)
+        else if (id.includes('4.1') || text.includes('kyc') || text.includes('currency')) {
+           if (currency !== 'US Dollar' && amount > 500) {
               triggered = true;
-              specificReason = `KYC Deficiency: Outward non-USD remittance of INR ${Math.round(amount * 83).toLocaleString()} lacks required headers per Section 4.1.`;
+              reason = `Forex Restriction: Non-USD remittance of INR ${Math.round(amount * 83).toLocaleString()} flags Section 4.1.`;
            }
         }
-        // Category 5: Mule / Network (Section 5.1)
-        else if (id.includes('5.1') || text.includes('source') || text.includes('destination')) {
-           const sources = destToSourceMap[dest]?.size || 0;
-           if (sources > 10) {
+        // E. Network / Mule (Mule destination)
+        else if (id.includes('5.1') || text.includes('source') || text.includes('mule')) {
+           const sourceCount = destToSourceMap[dest]?.size || 0;
+           if (sourceCount > 10) {
               triggered = true;
-              specificReason = `Network Risk: Destination ${dest} receiving funds from ${sources} unique sources (Flagged by Section 5.1).`;
+              reason = `Network Anomaly: Destination ${dest} flags high-degree nodal concentration (Section 5.1).`;
            }
         }
-        // Generic: If above categories didn't match, use dynamic detection
-        else {
-           const numbers = text.match(/\d+([,]\d+)*/g);
-           const dynamicThreshold = numbers ? parseInt(numbers[0].replace(/,/g, ''), 10) : null;
-           if (dynamicThreshold && amount * 83 > dynamicThreshold && amount > 10000) {
+        // F. Pattern / Rounding (Structured Profile)
+        else if (id.includes('5.2') || text.includes('round') || text.includes('odd')) {
+           if (amount % 1000 === 0 && amount > 1000) {
               triggered = true;
-              specificReason = `Dynamic Breach: Transaction exceeds derived policy ceiling of INR ${dynamicThreshold.toLocaleString()} (Policy ${id}).`;
+              reason = `Pattern Profile: Suspicious round-number ingestion (Clause ${id} match).`;
            }
         }
 
         if (triggered && !violatedRules.some(v => v.clause_id === id)) {
-           violatedRules.push({ ...rule, _reason: specificReason });
+           violatedRules.push({ ...rule, _reason: reason });
         }
       });
 
@@ -460,11 +456,11 @@ export const Compliance: React.FC = () => {
                <table className="w-full text-left">
                  <thead className="bg-slate-50/50 sticky top-0 z-10 backdrop-blur-sm border-b border-slate-100">
                    <tr>
-                     <th className="py-5 px-8 text-left font-black text-[11px] uppercase tracking-widest text-slate-400 w-32">TXN ID</th>
+                     <th className="py-5 px-8 text-left font-black text-[11px] uppercase tracking-widest text-slate-400 w-32">Index</th>
                      <SortHeader label="Amount" col="amount" />
-                     <th className="py-5 px-6 text-left font-black text-[11px] uppercase tracking-widest text-slate-400">Type</th>
-                     <th className="py-5 px-6 text-left font-black text-[11px] uppercase tracking-widest text-slate-400">Account</th>
-                     <th className="py-5 px-6 text-left font-black text-[11px] uppercase tracking-widest text-slate-400">Forensic Audit Summary</th>
+                     <th className="py-5 px-6 text-left font-black text-[11px] uppercase tracking-widest text-slate-400">Transaction Type</th>
+                     <th className="py-5 px-6 text-left font-black text-[11px] uppercase tracking-widest text-slate-400">Employee ID</th>
+                     <th className="py-5 px-6 text-left font-black text-[11px] uppercase tracking-widest text-slate-400">Rules Violated</th>
                      <SortHeader label="Risk Level" col="risk" />
                      <th className="py-5 px-8 text-right font-black text-[11px] uppercase tracking-widest text-slate-400 w-24">Action</th>
                    </tr>
@@ -500,46 +496,16 @@ export const Compliance: React.FC = () => {
                                </div>
                                  <div className="space-y-1.5 whitespace-pre-line">
                                    {d._rules.map((r: any, idx: number) => (
-                                       <div key={idx} className="flex flex-col gap-2 py-2 px-3 bg-white rounded-xl border border-slate-100 shadow-sm hover:border-[#A8E6CF] transition-all mb-2">
-                                          <div className="flex items-center justify-between border-b border-slate-50 pb-1.5 mb-1">
-                                             <div className="flex items-center gap-2">
-                                                <span className="text-[10px] font-black text-[#2D5A4C] bg-[#A8E6CF]/20 px-2 py-0.5 rounded cursor-default uppercase">{r.clause_id}</span>
-                                                <span className="text-[9px] font-black text-slate-400 opacity-60 uppercase">{r.section_ref || 'GENERAL'}</span>
-                                             </div>
-                                             <div className="flex items-center gap-1.5">
-                                                <span className="text-[8px] font-bold text-slate-300 uppercase">AI Conf:</span>
-                                                <span className="text-[10px] font-black text-[#A8E6CF]">{r.confidence || 98}%</span>
-                                             </div>
-                                          </div>
-                                          
-                                          <div className="grid grid-cols-1 gap-2">
-                                             <div>
-                                                <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Condition (Triggering Logic)</p>
-                                                <p className="text-[10px] text-slate-700 font-medium leading-tight line-clamp-2 italic">“{r.condition}”</p>
-                                             </div>
-                                             
-                                             <div>
-                                                <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Obligation (Impact Enforcement)</p>
-                                                <p className="text-[10px] text-emerald-600 font-bold leading-tight">{r.obligation}</p>
-                                             </div>
-
-                                             {r.exception && (
-                                               <div>
-                                                  <p className="text-[8px] font-black text-rose-300 uppercase tracking-widest mb-0.5">Exception</p>
-                                                  <p className="text-[9px] text-rose-400/80 font-medium leading-tight line-clamp-1">{r.exception}</p>
-                                               </div>
-                                             )}
-
-                                             <div className="pt-1.5 border-t border-slate-50">
-                                                <p className="text-[8px] font-black text-slate-300 uppercase tracking-widest mb-0.5">Forensic Findings</p>
-                                                <p className="text-[9px] text-slate-400 font-medium leading-relaxed italic border-l-2 border-[#A8E6CF]/30 pl-2">
-                                                   {r._reason}
-                                                </p>
-                                             </div>
-                                          </div>
-                                       </div>
-                                  ))}
-                                </div>
+                                      <div key={idx} className="flex flex-col gap-0.5 relative pl-3 before:absolute before:left-0 before:top-1.5 before:w-1.5 before:h-1.5 before:bg-[#A8E6CF] before:rounded-full">
+                                        <p className="text-[10px] text-slate-800 font-bold leading-tight">
+                                          {r.obligation || r.requirement}
+                                        </p>
+                                        <p className="text-[9px] text-slate-400 font-medium leading-relaxed italic">
+                                          {r._reason}
+                                        </p>
+                                      </div>
+                                   ))}
+                                 </div>
                              </div>
                            ) : (
                              <div className="flex items-center gap-2 text-emerald-500">

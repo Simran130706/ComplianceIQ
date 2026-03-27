@@ -174,11 +174,11 @@ export const Policies: React.FC = () => {
                     </div>
                      <div className="space-y-4">
                         <div>
-                          <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest mb-1">Triggering Logic (Condition)</p>
+                          <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest mb-1">Triggering Logic</p>
                           <p className="text-sm font-bold text-slate-700 leading-relaxed italic">"{r.condition}"</p>
                         </div>
                         <div>
-                          <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest mb-1">Impact Enforcement (Obligation)</p>
+                          <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest mb-1">Impact Enforcement</p>
                           <p className="text-sm font-black text-emerald-600 leading-tight tracking-tight">{r.obligation}</p>
                         </div>
                         {r.exception && (
@@ -189,7 +189,7 @@ export const Policies: React.FC = () => {
                         )}
                      </div>
                     <div className="flex items-center gap-4 pt-4 border-t border-slate-200/50">
-                       <span className="text-[10px] font-black text-slate-400">AI EXTRACTION CONFIDENCE</span>
+                       <span className="text-[10px] font-black text-slate-400">INDEX CONFIDENCE</span>
                        <div className="flex-1 h-1.5 bg-slate-200 rounded-full overflow-hidden">
                           <motion.div initial={{ width: 0 }} animate={{ width: `${r.confidence}%` }} className="h-full bg-[#A8E6CF]" />
                        </div>

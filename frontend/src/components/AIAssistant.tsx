@@ -110,7 +110,7 @@ export const AIAssistant: React.FC = () => {
             initial={{ opacity: 0, y: 100, scale: 0.8 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 100, scale: 0.8 }}
-            className="fixed bottom-32 right-10 z-[999] w-[500px] h-[750px] bg-white/80 backdrop-blur-[40px] rounded-[3.5rem] shadow-[0_80px_150px_-30px_rgba(0,0,0,0.3)] border-[6px] border-white flex flex-col overflow-hidden"
+            className="fixed bottom-32 right-8 z-[999] w-[420px] max-w-[calc(100vw-2rem)] h-[750px] max-h-[85vh] bg-white/80 backdrop-blur-[40px] rounded-[3.5rem] shadow-[0_80px_150px_-30px_rgba(0,0,0,0.3)] border-[6px] border-white flex flex-col overflow-hidden"
           >
             {/* Cinematic Header */}
             <div className="p-10 bg-slate-900 text-white relative overflow-hidden">

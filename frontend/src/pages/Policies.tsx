@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useData } from '../context/DataContext';
 import { 
   UploadCloud, ShieldCheck, Activity, FileText, 
@@ -6,7 +6,8 @@ import {
   TrendingDown, UserCheck, Timer, Info, XCircle,
   Zap, Lightbulb, FileWarning, Cpu, Play, MousePointer2,
   RefreshCcw, ChevronRight, Layers, Target, ArrowDownCircle,
-  Maximize2, Eye, ShieldQuestion, Minimize2
+  Maximize2, Eye, ShieldQuestion, Minimize2,
+  Link2, Globe, Upload, CheckCircle2, Loader2, X, FileSearch
 } from 'lucide-react';
 import { 
   ReactFlow, Background, Controls, MarkerType, 
@@ -201,13 +202,29 @@ const DiagnosticModal = ({ node, onClose }: { node: any, onClose: () => void }) 
 
 // --- Page Component ---
 
+type InputMode = 'pdf-file' | 'pdf-url' | 'webpage';
+
+interface ExtractionResult {
+  rules: any[];
+  source: string;
+  extractedChars: number;
+  preview?: string;
+}
+
 export const Policies: React.FC = () => {
   const { rules, setRules } = useData();
-  const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<any>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Upload panel state
+  const [mode, setMode] = useState<InputMode>('pdf-file');
+  const [urlInput, setUrlInput] = useState('');
+  const [isExtracting, setIsExtracting] = useState(false);
+  const [extractError, setExtractError] = useState<string | null>(null);
+  const [extractResult, setExtractResult] = useState<ExtractionResult | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
      if (isFullscreen) document.body.style.overflow = 'hidden';
@@ -215,17 +232,129 @@ export const Policies: React.FC = () => {
      return () => { document.body.style.overflow = 'auto'; };
   }, [isFullscreen]);
 
+  // Reset panel state when mode changes
+  useEffect(() => {
+    setUrlInput('');
+    setExtractError(null);
+    setExtractResult(null);
+  }, [mode]);
+
+  const applyRules = (result: ExtractionResult) => {
+    setRules(result.rules || []);
+    setExtractResult(null);
+    setUrlInput('');
+    setExtractError(null);
+  };
+
+  // ── PDF file upload ──────────────────────────────────────────
   const processFile = async (file: File) => {
-    if (file.type !== 'application/pdf') { setError('Please upload a valid PDF document.'); return; }
-    setUploading(true); setError(null);
+    if (file.type !== 'application/pdf') {
+      setExtractError('Please upload a valid PDF document (.pdf).');
+      return;
+    }
+    setIsExtracting(true);
+    setExtractError(null);
+    setExtractResult(null);
     const formData = new FormData();
     formData.append('policy', file);
     try {
-      const response = await fetch('http://localhost:3001/api/extract-rules', { method: 'POST', body: formData });
-      const data = await response.json();
-      setRules(data.rules || []);
-    } catch (err: any) { setError(err.message || 'Error communicating with backend.'); }
-    finally { setUploading(false); }
+      const res = await fetch('http://localhost:3001/api/extract-rules', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Extraction failed.');
+      if (!data.rules?.length) throw new Error('No policy rules could be extracted from this PDF.');
+      setExtractResult({ rules: data.rules, source: 'pdf-file', extractedChars: 0, preview: `${data.rules.length} rules extracted from "${file.name}"` });
+    } catch (err: any) {
+      setExtractError(err.message || 'Error communicating with backend.');
+    } finally {
+      setIsExtracting(false);
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) processFile(file);
+    e.target.value = '';
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) processFile(file);
+  };
+
+  // ── PDF URL ──────────────────────────────────────────────────
+  const handlePdfUrl = async () => {
+    const url = urlInput.trim();
+    if (!url) { setExtractError('Please enter a PDF URL.'); return; }
+    setIsExtracting(true);
+    setExtractError(null);
+    setExtractResult(null);
+    try {
+      const res = await fetch('http://localhost:3001/api/extract-from-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Extraction failed.');
+      if (!data.rules?.length) throw new Error('No policy rules could be extracted from this PDF URL.');
+      setExtractResult({
+        rules: data.rules,
+        source: 'pdf-url',
+        extractedChars: data.extractedChars,
+        preview: `${data.rules.length} rules extracted from remote PDF (${(data.extractedChars / 1000).toFixed(1)}k chars)`
+      });
+    } catch (err: any) {
+      setExtractError(err.message || 'Error processing PDF URL.');
+    } finally {
+      setIsExtracting(false);
+    }
+  };
+
+  // ── Webpage URL ──────────────────────────────────────────────
+  const handleWebpageUrl = async () => {
+    const url = urlInput.trim();
+    if (!url) { setExtractError('Please enter a webpage URL.'); return; }
+    setIsExtracting(true);
+    setExtractError(null);
+    setExtractResult(null);
+    try {
+      const res = await fetch('http://localhost:3001/api/extract-from-webpage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Extraction failed.');
+      if (!data.rules?.length) throw new Error('No policy rules could be extracted from this webpage.');
+      setExtractResult({
+        rules: data.rules,
+        source: 'webpage',
+        extractedChars: data.extractedChars,
+        preview: data.preview || `${data.rules.length} rules extracted from webpage`
+      });
+    } catch (err: any) {
+      setExtractError(err.message || 'Error processing webpage.');
+    } finally {
+      setIsExtracting(false);
+    }
+  };
+
+  const handleSubmit = () => {
+    if (mode === 'pdf-file') { fileInputRef.current?.click(); return; }
+    if (mode === 'pdf-url') { handlePdfUrl(); return; }
+    handleWebpageUrl();
+  };
+
+  const TAB_MODES: { id: InputMode; label: string; icon: React.ReactNode; desc: string }[] = [
+    { id: 'pdf-file', label: 'Upload PDF', icon: <Upload className="w-4 h-4" />, desc: 'Upload a local PDF policy document' },
+    { id: 'pdf-url',  label: 'PDF URL',    icon: <Link2  className="w-4 h-4" />, desc: 'Paste a direct link to a .pdf file' },
+    { id: 'webpage',  label: 'Webpage URL', icon: <Globe  className="w-4 h-4" />, desc: 'Paste any webpage containing policy text' },
+  ];
+
+  const sourceLabel: Record<string, string> = {
+    'pdf-file': 'PDF Upload', 'pdf-url': 'Remote PDF', 'webpage': 'Webpage Scrape'
   };
 
   const { nodes, edges } = useMemo(() => {
@@ -328,12 +457,174 @@ export const Policies: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {!rules?.length && (
-         <div className="flex-1 flex flex-col items-center justify-center p-20 glass-card border-4 border-dashed border-slate-200 bg-white/50 m-10 rounded-[5rem]">
-            <input type="file" id="pdf-in" className="hidden" accept="application/pdf" onChange={(e) => e.target.files?.[0] && processFile(e.target.files[0])} />
-            <label htmlFor="pdf-in" className="px-16 py-8 bg-emerald-500 text-white rounded-[2rem] font-black text-sm cursor-pointer shadow-3xl uppercase tracking-widest leading-none active:scale-95 transition-all">Upload Matrix</label>
+      {/* --- HIGH-FIDELITY INGESTION PANEL --- */}
+      <div className="w-full max-w-6xl mx-auto">
+        <div className="glass-card border-2 border-slate-100 bg-white/40 shadow-2xl rounded-[4rem] overflow-hidden p-12 flex flex-col gap-10 relative">
+          
+          {/* Extraction Loading Overlay */}
+          <AnimatePresence>
+            {isExtracting && (
+              <motion.div 
+                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                className="absolute inset-0 z-[100] bg-white/80 backdrop-blur-xl flex flex-col items-center justify-center gap-10"
+              >
+                <div className="relative">
+                  <motion.div 
+                    animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 4, ease: "linear" }}
+                    className="w-40 h-40 rounded-full border-b-4 border-emerald-500 shadow-[0_0_50px_rgba(16,185,129,0.3)]"
+                  />
+                  <div className="absolute inset-0 flex items-center justify-center text-emerald-500">
+                    <Loader2 size={48} className="animate-spin" />
+                  </div>
+                </div>
+                <div className="text-center space-y-2">
+                  <h3 className="text-3xl font-black text-slate-800 tracking-tighter uppercase italic italic">Analyzing Source</h3>
+                  <p className="text-[12px] font-black text-emerald-500 uppercase tracking-[0.5em] animate-pulse">Neural Rule Extraction Pipeline Active</p>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Tab Navigation */}
+          <div className="flex gap-4 p-2 bg-slate-100/50 rounded-[2.5rem] w-fit border border-slate-200 shadow-inner">
+            {TAB_MODES.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setMode(t.id)}
+                className={`flex items-center gap-4 px-10 py-5 rounded-[2rem] font-black text-xs uppercase tracking-widest transition-all ${
+                  mode === t.id 
+                    ? 'bg-white text-emerald-600 shadow-xl border border-emerald-100 scale-105' 
+                    : 'text-slate-400 hover:text-slate-600'
+                }`}
+              >
+                {t.icon} {t.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex flex-col gap-8">
+            <div className="space-y-2">
+              <h2 className="text-4xl font-black text-slate-800 tracking-tighter uppercase italic leading-none">
+                {TAB_MODES.find(t => t.id === mode)?.label}
+              </h2>
+              <p className="text-[12px] font-black text-slate-400 uppercase tracking-[0.4em]">
+                {TAB_MODES.find(t => t.id === mode)?.desc}
+              </p>
+            </div>
+
+            {/* Input Area */}
+            {mode === 'pdf-file' ? (
+              <div 
+                onClick={() => fileInputRef.current?.click()}
+                onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={handleDrop}
+                className={`h-72 border-4 border-dashed rounded-[3.5rem] flex flex-col items-center justify-center gap-6 cursor-pointer transition-all ${
+                  dragOver ? 'border-emerald-500 bg-emerald-50/50 scale-[0.98]' : 'border-slate-200 bg-slate-50/50 hover:bg-white hover:border-emerald-500/30'
+                }`}
+              >
+                <input ref={fileInputRef} type="file" className="hidden" accept="application/pdf" onChange={handleFileChange} />
+                <div className="p-8 bg-emerald-500 text-white rounded-[2rem] shadow-2xl transform transition-transform group-hover:scale-110">
+                  <UploadCloud size={64} />
+                </div>
+                <div className="text-center space-y-1">
+                  <p className="text-xl font-black text-slate-700 uppercase tracking-tighter italic">Drop Policy Matrix Here</p>
+                  <p className="text-[12px] font-bold text-slate-400">PDF Document Only (Max 20MB)</p>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-6">
+                <div className="group relative">
+                  <div className="absolute inset-y-0 left-8 flex items-center text-slate-300 group-focus-within:text-emerald-500 transition-colors">
+                    {mode === 'pdf-url' ? <Link2 size={32} /> : <Globe size={32} />}
+                  </div>
+                  <input 
+                    value={urlInput}
+                    onChange={(e) => setUrlInput(e.target.value)}
+                    placeholder={mode === 'pdf-url' ? "https://regulatory.gov.in/policy.pdf" : "https://www.rbi.org.in/compliance-news"}
+                    className="w-full h-24 pl-24 pr-10 bg-slate-50 border-4 border-slate-100 rounded-[2.5rem] font-bold text-xl text-slate-700 outline-none focus:bg-white focus:border-emerald-500 focus:shadow-[0_0_80px_rgba(16,185,129,0.1)] transition-all placeholder:text-slate-200 placeholder:italic"
+                  />
+                  {urlInput && (
+                    <button onClick={() => setUrlInput('')} className="absolute inset-y-0 right-8 text-slate-300 hover:text-rose-500">
+                      <XCircle size={32} />
+                    </button>
+                  )}
+                </div>
+                <div className="flex justify-end pt-2">
+                  <button 
+                    onClick={handleSubmit}
+                    className="px-20 py-8 bg-emerald-500 text-white rounded-full font-black text-sm uppercase tracking-[0.5em] shadow-3xl hover:bg-emerald-600 transition-all active:scale-95 flex items-center gap-6"
+                  >
+                    <Cpu size={28} /> Start Extraction Matrix
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Error Message */}
+            <AnimatePresence>
+              {extractError && (
+                <motion.div 
+                  initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
+                  className="p-8 bg-rose-50 border-2 border-rose-100 rounded-[2rem] flex items-center gap-6 text-rose-600 shadow-sm"
+                >
+                  <AlertCircle size={32} />
+                  <p className="font-bold text-sm tracking-tight">{extractError}</p>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Extraction Result Preview Card */}
+            <AnimatePresence>
+              {extractResult && (
+                <motion.div 
+                  initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }}
+                  className="p-12 bg-emerald-50 border-4 border-emerald-100 rounded-[3.5rem] flex flex-col gap-10 shadow-xl relative overflow-hidden"
+                >
+                  <div className="absolute top-0 right-0 p-8 text-emerald-200"><ShieldCheck size={120} /></div>
+                  
+                  <div className="flex justify-between items-start relative z-10">
+                    <div className="flex items-center gap-6">
+                      <div className="p-5 bg-emerald-500 text-white rounded-[1.5rem] shadow-lg"><FileSearch size={32} /></div>
+                      <div>
+                        <h4 className="text-2xl font-black text-emerald-800 uppercase italic tracking-tighter">Extraction Signal Detected</h4>
+                        <div className="flex gap-4 items-center mt-2">
+                          <span className="text-[10px] font-black text-emerald-600 bg-white border border-emerald-200 px-3 py-1 rounded-full uppercase tracking-widest">{sourceLabel[extractResult.source]}</span>
+                          <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">{extractResult.rules.length} Logic Clauses Indexed</span>
+                        </div>
+                      </div>
+                    </div>
+                    <button onClick={() => setExtractResult(null)} className="p-3 text-emerald-300 hover:text-rose-500 transition-all"><X size={32} /></button>
+                  </div>
+
+                  <div className="bg-white/60 p-8 rounded-[2rem] border border-emerald-100/50 shadow-inner max-h-48 overflow-y-auto custom-scrollbar relative">
+                    <p className="text-[11px] font-black text-emerald-400 uppercase tracking-[0.4em] mb-4 italic sticky top-0 bg-white/60 z-10">Content Fragment</p>
+                    <p className="text-xl font-bold text-slate-500 italic leading-relaxed break-words leading-tight">
+                      {extractResult.preview ? `"${extractResult.preview}..."` : "Extraction payload verified and ready for tree injection."}
+                    </p>
+                  </div>
+
+                  <div className="flex gap-6 relative z-10">
+                    <button 
+                      onClick={() => applyRules(extractResult)}
+                      className="flex-1 py-8 bg-emerald-500 text-white rounded-[2rem] font-black text-xs uppercase tracking-[0.5em] shadow-3xl hover:bg-emerald-600 transition-all shadow-emerald-500/20"
+                    >
+                      <CheckCircle2 size={24} className="inline mr-4" /> Inject Into Neural Matrix
+                    </button>
+                    <button 
+                      onClick={() => setExtractResult(null)}
+                      className="px-12 py-8 bg-white text-slate-400 rounded-[2rem] font-black text-xs uppercase tracking-[0.5em] border border-slate-100 shadow-sm hover:text-rose-500 transition-all"
+                    >
+                      ABORT
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+          </div>
         </div>
-      )}
+      </div>
 
       {rules?.length > 0 && (
         <div className="flex flex-col gap-10">

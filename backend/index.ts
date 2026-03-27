@@ -6,6 +6,8 @@ import { Groq } from 'groq-sdk';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
+import axios from 'axios';
+import { parse as parseHtml } from 'node-html-parser';
 
 // Load environment variables from .env file
 dotenv.config();
@@ -150,6 +152,204 @@ app.post('/api/extract-rules', upload.single('policy'), async (req, res) => {
   }
 });
 
+// ─── Shared helper: extract rules from raw text ───────────────────────────────
+async function extractRulesFromText(pdfText: string): Promise<any[]> {
+  const chatCompletion = await groq.chat.completions.create({
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: `Extract rules from this text:\n\n${pdfText.slice(0, 30000)}` }
+    ],
+    model: 'llama-3.1-8b-instant',
+    temperature: 0,
+    response_format: { type: 'json_object' }
+  });
+  const responseContent = chatCompletion.choices[0]?.message?.content || '{}';
+  const rawObj = JSON.parse(responseContent);
+  if (Array.isArray(rawObj.rules)) return rawObj.rules;
+  if (Array.isArray(rawObj)) return rawObj;
+  return Object.values(rawObj).find((v: any) => Array.isArray(v)) as any[] || [];
+}
+
+// ─── URL validation helper ────────────────────────────────────────────────────
+function isValidUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return ['http:', 'https:'].includes(parsed.protocol);
+  } catch {
+    return false;
+  }
+}
+
+// ─── /api/extract-from-url — fetch a remote PDF and extract rules ─────────────
+app.post('/api/extract-from-url', async (req, res) => {
+  try {
+    const { url } = req.body as { url?: string };
+
+    if (!url || typeof url !== 'string' || !url.trim()) {
+      return res.status(400).json({ error: 'A PDF URL is required.' });
+    }
+    if (!isValidUrl(url.trim())) {
+      return res.status(400).json({ error: 'Invalid URL. Please provide a valid http or https URL.' });
+    }
+    if (!url.trim().toLowerCase().endsWith('.pdf')) {
+      return res.status(400).json({
+        error: 'The URL does not appear to point to a PDF file. Please provide a direct .pdf link.'
+      });
+    }
+
+    console.log('Fetching remote PDF from:', url.trim());
+    let pdfBuffer: Buffer;
+    try {
+      const response = await axios.get(url.trim(), {
+        responseType: 'arraybuffer',
+        timeout: 30000,
+        maxContentLength: 20 * 1024 * 1024, // 20 MB limit
+        headers: { 'User-Agent': 'ComplianceIQ/1.0 Policy Fetcher' }
+      });
+      pdfBuffer = Buffer.from(response.data);
+    } catch (fetchErr: any) {
+      const status = fetchErr?.response?.status;
+      if (status === 403 || status === 401) {
+        return res.status(400).json({ error: 'Access denied. The PDF URL requires authentication or is restricted.' });
+      }
+      if (status === 404) {
+        return res.status(400).json({ error: 'PDF not found at the provided URL. Please check the link.' });
+      }
+      return res.status(400).json({ error: `Failed to fetch PDF: ${fetchErr.message}` });
+    }
+
+    if (pdfBuffer.length < 5 || !pdfBuffer.toString('utf8', 0, 5).includes('%PDF')) {
+      return res.status(400).json({ error: 'The URL did not return a valid PDF file.' });
+    }
+
+    let pdfText = '';
+    try {
+      const data = await pdfParse(pdfBuffer);
+      pdfText = data.text;
+    } catch (parseErr: any) {
+      return res.status(400).json({ error: 'Failed to parse the PDF. It may be scanned or password-protected.' });
+    }
+
+    if (!pdfText.trim()) {
+      return res.status(400).json({ error: 'PDF appears to contain no extractable text (may be a scanned image PDF).' });
+    }
+
+    console.log('Remote PDF text extracted, chars:', pdfText.length);
+    const rules = await extractRulesFromText(pdfText);
+    console.log('Rules extracted:', rules.length);
+    return res.json({ rules, extractedChars: pdfText.length, source: 'pdf-url' });
+
+  } catch (error: any) {
+    console.error('extract-from-url error:', error.message);
+    return res.status(500).json({ error: error.message || 'Internal server error.' });
+  }
+});
+
+// ─── /api/extract-from-webpage — scrape HTML page and extract rules ───────────
+app.post('/api/extract-from-webpage', async (req, res) => {
+  try {
+    const { url } = req.body as { url?: string };
+
+    if (!url || typeof url !== 'string' || !url.trim()) {
+      return res.status(400).json({ error: 'A webpage URL is required.' });
+    }
+    if (!isValidUrl(url.trim())) {
+      return res.status(400).json({ error: 'Invalid URL. Please provide a valid http or https URL.' });
+    }
+
+    // Block common non-policy domains for safety
+    const blocked = ['localhost', '127.0.0.1', '0.0.0.0', '::1', '169.254', '10.', '192.168.'];
+    const hostname = new URL(url.trim()).hostname.toLowerCase();
+    if (blocked.some(b => hostname.includes(b))) {
+      return res.status(400).json({ error: 'Local or private network URLs are not allowed.' });
+    }
+
+    console.log('Fetching webpage:', url.trim());
+    let html = '';
+    try {
+      const response = await axios.get(url.trim(), {
+        timeout: 20000,
+        maxContentLength: 5 * 1024 * 1024,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; ComplianceIQ/1.0; Policy Fetcher)',
+          'Accept': 'text/html,application/xhtml+xml'
+        }
+      });
+      const contentType = (response.headers['content-type'] || '').toLowerCase();
+      if (contentType.includes('application/pdf')) {
+        return res.status(400).json({
+          error: 'This URL returns a PDF, not a webpage. Please use the "PDF URL" option instead.'
+        });
+      }
+      html = response.data as string;
+    } catch (fetchErr: any) {
+      const status = fetchErr?.response?.status;
+      if (status === 403 || status === 401) {
+        return res.status(400).json({ error: 'Access denied. This webpage requires authentication.' });
+      }
+      if (status === 404) {
+        return res.status(400).json({ error: 'Page not found at the provided URL.' });
+      }
+      return res.status(400).json({ error: `Failed to fetch webpage: ${fetchErr.message}` });
+    }
+
+    // Strip noise elements — nav, header, footer, ads, scripts, styles
+    const root = parseHtml(html);
+    const noiseSelectors = [
+      'nav', 'header', 'footer', 'aside', 'script', 'style', 'noscript',
+      '[class*="nav"]', '[class*="menu"]', '[class*="sidebar"]',
+      '[class*="cookie"]', '[class*="banner"]', '[class*="advertisement"]',
+      '[class*="social"]', '[class*="share"]', '[id*="nav"]',
+      '[id*="header"]', '[id*="footer"]', '[id*="sidebar"]'
+    ];
+    noiseSelectors.forEach(sel => {
+      try { root.querySelectorAll(sel).forEach((el: any) => el.remove()); } catch {}
+    });
+
+    // Extract text from meaningful content elements first
+    let pageText = '';
+    const contentSelectors = ['main', 'article', '[role="main"]', '.content', '#content', '.post', '.entry-content'];
+    for (const sel of contentSelectors) {
+      const el = root.querySelector(sel);
+      if (el) {
+        pageText = el.text;
+        break;
+      }
+    }
+    // Fallback to body
+    if (!pageText.trim()) {
+      pageText = root.querySelector('body')?.text || root.text;
+    }
+
+    // Clean whitespace
+    pageText = pageText
+      .replace(/\t/g, ' ')
+      .replace(/[ ]{3,}/g, '  ')
+      .replace(/\n{4,}/g, '\n\n')
+      .trim();
+
+    if (!pageText.trim() || pageText.length < 100) {
+      return res.status(400).json({
+        error: 'Could not extract useful policy content from this webpage. The page may require JavaScript or login.'
+      });
+    }
+
+    console.log('Webpage text extracted, chars:', pageText.length);
+    const rules = await extractRulesFromText(pageText);
+    console.log('Rules extracted from webpage:', rules.length);
+    return res.json({
+      rules,
+      extractedChars: pageText.length,
+      preview: pageText.slice(0, 500),
+      source: 'webpage'
+    });
+
+  } catch (error: any) {
+    console.error('extract-from-webpage error:', error.message);
+    return res.status(500).json({ error: error.message || 'Internal server error.' });
+  }
+});
+
 function stripJsonFences(input: string) {
   // Handles cases like: ```json { ... } ```
   return input
@@ -234,6 +434,71 @@ Return ONLY this JSON, no markdown, no extra text:
   "clauses_checked": <number, minimum 1, maximum 5>,
   "clauses_covered": <number>
 }`;
+
+const assistantSystemPrompt = `You are "ComplianceIQ AI", an advanced regulatory intelligence assistant.
+Your role: Analyze financial data, RBI/SEBI policies, and queries with precision.
+
+CORE BEHAVIOR:
+- Respond in structured BULLET POINTS. 
+- Avoid long paragraphs. Concise, sharp, analytical.
+- Focus on actionable insights.
+
+OUTPUT FORMAT:
+1. Summary (1-2 lines)
+2. Key Findings (Bullets)
+3. Risk Indicators (Bullets)
+4. Compliance Check (Violations)
+5. Recommendation (Next action)
+
+ANALYSIS RULES:
+- Identify suspicious patterns (high-value, structuring, anomalies).
+- Compare against policy thresholds.
+- Explain WHY something is risky (not just WHAT).
+- If insufficient data, say: "Insufficient data to conclude"
+- THINK LIKE A COMPLIANCE AUDITOR.`;
+
+app.post('/api/chat', async (req, res) => {
+  try {
+    const { message, history, transactions, rules } = req.body;
+
+    if (!message) return res.status(400).json({ error: 'Message is required.' });
+
+    // Format context for LLM
+    const txnContext = Array.isArray(transactions) && transactions.length > 0
+      ? `RECENT TRANSACTIONS (Top 20):\n${JSON.stringify(transactions.slice(0, 20), null, 2)}`
+      : 'No transaction data available.';
+
+    const ruleContext = Array.isArray(rules) && rules.length > 0
+      ? `ACTIVE POLICY RULES:\n${JSON.stringify(rules.map(r => ({ rule_id: r.clause_id || r.rule_id, condition: r.condition, obligation: r.obligation })), null, 2)}`
+      : 'No policy rules active.';
+
+    const promptHistory = Array.isArray(history) 
+      ? history.map((m: any) => ({ role: m.isUser ? 'user' : 'assistant', content: m.text }))
+      : [];
+
+    console.log('Chat request received. Context size:', transactions?.length || 0, 'txns,', rules?.length || 0, 'rules.');
+
+    const chatCompletion = await groq.chat.completions.create({
+      messages: [
+        { role: 'system', content: `${assistantSystemPrompt}\n\nCONTEXT:\n${txnContext}\n\n${ruleContext}` },
+        ...promptHistory,
+        { role: 'user', content: message }
+      ],
+      model: 'llama-3.1-70b-versatile', // Using larger model for reasoning
+      temperature: 0.2,
+      max_tokens: 1500
+    });
+
+    const response = chatCompletion.choices[0]?.message?.content || "I am unable to analyze that request at the moment.";
+    console.log('Assistant response generated.');
+
+    res.json({ response });
+
+  } catch (error: any) {
+    console.error('Chat error:', error.message);
+    res.status(500).json({ error: 'Assistant Intelligence Link Failed: ' + error.message });
+  }
+});
 
 // Standardized clause counting for consistency
 const getStandardClauseCount = (circularId: string): number => {

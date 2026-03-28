@@ -1,6 +1,6 @@
-# 🛡️ ComplianceIQ: AI-Powered Regulatory Intelligence for Fintech
+# 🛡️ DhanrakshaQ: AI-Powered Regulatory Intelligence for Fintech
 
-**ComplianceIQ** is a futuristic, next-generation fintech engine designed for the Indian banking sector. It bridges the gap between static regulatory circulars (RBI/SEBI) and real-time transaction monitoring by automating rule extraction and forensic investigation.
+**DhanrakshaQ** is a futuristic, next-generation fintech engine designed for the Indian banking sector. It bridges the gap between static regulatory circulars (RBI/SEBI) and real-time transaction monitoring by automating rule extraction and forensic investigation.
 
 ---
 

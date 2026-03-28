@@ -42,7 +42,7 @@ export const Layout: React.FC = () => {
       <footer className="py-12 border-t border-slate-100 bg-white">
         <div className="max-w-[1280px] mx-auto px-6 flex flex-col md:flex-row justify-between items-center gap-6">
           <div className="flex items-center gap-3">
-            <span className="text-lg font-black text-slate-800 tracking-tighter">ComplianceIQ</span>
+            <span className="text-lg font-black text-slate-800 tracking-tighter">DhanrakshaQ</span>
             <span className="text-slate-300">|</span>
             <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Regulatory Ledger Node</span>
           </div>

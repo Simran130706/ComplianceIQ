@@ -1,5 +1,5 @@
 import React from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
 import { Shield, Home, FileText, CheckSquare, AlertCircle, Search, PlayCircle, Eye } from 'lucide-react';
 import { twMerge } from 'tailwind-merge';
 import { clsx } from 'clsx';
@@ -15,13 +15,18 @@ const navItems = [
 ];
 
 export const Navbar: React.FC = () => {
+  const navigate = useNavigate();
+  
   return (
     <nav className="fixed top-0 left-0 right-0 h-20 bg-white border-b border-slate-100 px-8 flex items-center justify-between z-[100] shadow-sm">
-      <div className="flex items-center gap-3">
+      <div 
+        className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity"
+        onClick={() => navigate('/')}
+      >
         <div className="p-2 bg-[#A8E6CF]/10 rounded-xl">
           <Shield className="w-6 h-6 text-[#3BB77E]" />
         </div>
-        <span className="text-xl font-black text-slate-800 tracking-tighter">ComplianceIQ</span>
+        <span className="text-xl font-black text-slate-800 tracking-tighter">DhanrakshaQ</span>
       </div>
 
       <div className="hidden lg:flex items-center gap-1">
